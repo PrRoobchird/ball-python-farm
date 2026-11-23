@@ -382,59 +382,264 @@ interface SpineNode {
   ny: number;
 }
 
-function getBodyRadius(u: number): number {
-  // Anatomical top-down Ball Python proportions:
-  // rounded snout -> broad cheeks -> narrow neck -> heavy muscular mid-body -> short stubby tail
-  if (u < 0.035) return 2.0 + (u / 0.035) * 2.1; // rounded snout
-  if (u < 0.095) return 4.1 + Math.sin(((u - 0.035) / 0.06) * Math.PI) * 0.7; // temporal cheeks
-  if (u < 0.145) {
-    const t = (u - 0.095) / 0.05;
-    return 4.1 - t * 1.3; // neck taper
+function getBodyRadius(u: number, scale = 1): number {
+  // Authentic Ball Python (Python regius) top-down silhouette:
+  // blunt rounded snout -> broad spade/temporal cheeks -> pinched slim neck -> muscular mid-body -> short conical tail
+  let r: number;
+  if (u < 0.025) {
+    r = 1.7 + (u / 0.025) * 1.9; // blunt rounded python snout
+  } else if (u < 0.064) {
+    r = 3.6 + Math.sin(((u - 0.025) / 0.039) * Math.PI) * 0.58; // broad temporal cheeks (~4.18px half-width)
+  } else if (u < 0.115) {
+    const t = (u - 0.064) / 0.051;
+    r = 3.6 - Math.sin(t * Math.PI * 0.5) * 1.45; // distinct slim neck pinch (~2.15px half-width)
+  } else if (u < 0.78) {
+    const mid = (u - 0.115) / 0.665;
+    r = 2.15 + Math.pow(Math.sin(mid * Math.PI), 0.78) * 2.35; // long, smooth muscular python torso (~4.5px peak half-width)
+  } else {
+    const tail = (u - 0.78) / 0.22;
+    r = Math.max(0.85, 2.15 * Math.pow(1 - tail, 1.08)); // signature short conical Ball Python tail
   }
-  if (u < 0.76) {
-    const mid = (u - 0.145) / 0.615;
-    return 2.8 + Math.sin(mid * Math.PI) * 2.9 + 1.3; // stout Ball Python girth (~5.7-7.0px half-width)
+  return r * scale;
+}
+
+function resampleSpineByArcLength(
+  guidePts: Array<{ x: number; y: number }>,
+  targetCount: number,
+  maxArcLength?: number
+): Array<{ x: number; y: number }> {
+  const cum: number[] = [0];
+  for (let i = 1; i < guidePts.length; i++) {
+    const dx = guidePts[i].x - guidePts[i - 1].x;
+    const dy = guidePts[i].y - guidePts[i - 1].y;
+    cum.push(cum[i - 1] + Math.hypot(dx, dy));
   }
-  const tail = (u - 0.76) / 0.24;
-  return Math.max(0.95, 4.1 * Math.pow(1 - tail, 0.85));
+  const totalLen = cum[cum.length - 1] || 1;
+  const usedLen = maxArcLength ? Math.min(totalLen, maxArcLength) : totalLen;
+
+  const resampled: Array<{ x: number; y: number }> = [];
+  let seg = 0;
+  for (let i = 0; i < targetCount; i++) {
+    const targetD = (i / (targetCount - 1)) * usedLen;
+    while (seg < cum.length - 2 && cum[seg + 1] < targetD) {
+      seg++;
+    }
+    const segLen = cum[seg + 1] - cum[seg] || 1;
+    const alpha = Math.max(0, Math.min(1, (targetD - cum[seg]) / segLen));
+    resampled.push({
+      x: guidePts[seg].x + (guidePts[seg + 1].x - guidePts[seg].x) * alpha,
+      y: guidePts[seg].y + (guidePts[seg + 1].y - guidePts[seg].y) * alpha,
+    });
+  }
+  return resampled;
+}
+
+interface SnakeMotionState {
+  travelPhase: number;
+  clock: number;
+  behavior: 'slither' | 'pause' | 'coil';
+  stateTimer: number;
+  speedScale: number;
+  baseSpeed: number;
+  coilWeight: number;
+  coilAnchorX: number;
+  coilAnchorY: number;
+  coilStartAngle: number;
+  coilTightness: number;
+  coilDir: number;
+  pathSeedA: number;
+  pathSeedB: number;
+  tongueTimer: number;
+  tongueOut: boolean;
+}
+
+function createInitialMotionState(
+  seed: number,
+  cols: number,
+  rows: number,
+  mode: 'showcase' | 'roam',
+  allowRandomMotion: boolean
+): SnakeMotionState {
+  const r1 = Math.sin(seed * 12.9898) * 43758.5453;
+  const frac = r1 - Math.floor(r1);
+  const randA = allowRandomMotion ? Math.random() : frac;
+  const randB = allowRandomMotion ? Math.random() : ((frac * 7.3) % 1);
+
+  let behavior: 'slither' | 'pause' | 'coil' = 'slither';
+  let coilWeight = 0;
+  let speedScale = 1;
+  let stateTimer = 4.5 + randB * 4.5;
+
+  if (mode === 'roam' && allowRandomMotion) {
+    if (randA < 0.34) {
+      behavior = 'coil';
+      coilWeight = 0.92;
+      speedScale = 0;
+      stateTimer = 3.2 + randB * 4.2;
+    } else if (randA < 0.56) {
+      behavior = 'pause';
+      coilWeight = 0.1;
+      speedScale = 0.05;
+      stateTimer = 1.6 + randB * 2.2;
+    }
+  }
+
+  return {
+    travelPhase: (seed % 23) * 0.65 + randA * 8.0,
+    clock: randB * 12.0,
+    behavior,
+    stateTimer,
+    speedScale,
+    baseSpeed: 0.78 + randB * 0.45,
+    coilWeight,
+    coilAnchorX: cols * (0.34 + randB * 0.32),
+    coilAnchorY: rows * (0.4 + randA * 0.2),
+    coilStartAngle: randA * Math.PI * 2,
+    coilTightness: 0.92 + randB * 0.16,
+    coilDir: (seed + (randA > 0.5 ? 1 : 0)) % 2 === 0 ? 1 : -1,
+    pathSeedA: (seed % 17) * 0.71 + (allowRandomMotion ? Math.random() * 2.5 : 0),
+    pathSeedB: (seed % 13) * 1.13 + (allowRandomMotion ? Math.random() * 2.5 : 0),
+    tongueTimer: 1.4 + randB * 3.2,
+    tongueOut: false,
+  };
+}
+
+function getSlitherPoint(
+  s: number,
+  cols: number,
+  rows: number,
+  motion: SnakeMotionState
+): { x: number; y: number } {
+  const localT = motion.travelPhase - s * 3.55;
+  const tx = localT * 0.92 + motion.pathSeedA;
+  const ty = localT * 1.61803 + motion.pathSeedB; // golden ratio avoids rigid repeating figure-8
+
+  const baseX =
+    cols * 0.5 + Math.sin(tx) * (cols * 0.31) + Math.cos(tx * 0.47) * (cols * 0.05);
+  const baseY =
+    rows * 0.5 + Math.sin(ty) * (rows * 0.21) + Math.cos(ty * 0.53) * (rows * 0.04);
+
+  const dx =
+    Math.cos(tx) * 0.92 * (cols * 0.31) - Math.sin(tx * 0.47) * 0.47 * 0.92 * (cols * 0.05);
+  const dy =
+    Math.cos(ty) * 1.61803 * (rows * 0.21) -
+    Math.sin(ty * 0.53) * 0.53 * 1.61803 * (rows * 0.04);
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+
+  // Travelling muscular push wave from neck to tail + subtle curious head glance when pausing
+  const waveAmp = 2.1 + motion.speedScale * 1.25;
+  const bodyWave =
+    Math.sin(s * Math.PI * 3.4 - motion.travelPhase * 2.35) * waveAmp * Math.sin(s * Math.PI);
+  const headGlance =
+    s < 0.14
+      ? Math.sin(motion.clock * 1.9 + motion.pathSeedA) *
+        (1 - s / 0.14) *
+        (motion.behavior === 'pause' ? 2.1 : 0.7)
+      : 0;
+
+  return {
+    x: baseX + nx * (bodyWave + headGlance),
+    y: baseY + ny * (bodyWave + headGlance),
+  };
+}
+
+function getCoilPoint(
+  s: number,
+  seed: number,
+  motion: SnakeMotionState
+): { x: number; y: number } {
+  // Natural Ball Python coiled resting posture:
+  // Tail & mid-body coil smoothly in ~1.55 turns, while head & neck drape calmly across the inner rim
+  const breath = Math.sin(motion.clock * 1.65 + seed) * 0.45;
+  const headDrift = Math.sin(motion.clock * 0.85 + seed * 0.7) * 0.2;
+  const startRad = 9.0 * motion.coilTightness;
+  const endRad = 22.8 * motion.coilTightness;
+  const sweep = Math.PI * 3.15;
+  const neckJoin = 0.16;
+
+  if (s >= neckJoin) {
+    const k = (s - neckJoin) / (1 - neckJoin);
+    const theta = motion.coilStartAngle + motion.coilDir * k * sweep;
+    const rad =
+      startRad +
+      k * (endRad - startRad) +
+      breath * (0.4 + 0.6 * k) +
+      Math.sin(k * Math.PI * 4.0 + seed) * 0.65;
+    return {
+      x: motion.coilAnchorX + Math.cos(theta) * rad,
+      y: motion.coilAnchorY + Math.sin(theta) * rad,
+    };
+  }
+
+  // Smooth C1-continuous neck-to-head curve resting across the coil rim
+  const enterX = motion.coilAnchorX + Math.cos(motion.coilStartAngle) * startRad;
+  const enterY = motion.coilAnchorY + Math.sin(motion.coilStartAngle) * startRad;
+  const tangentAngle = motion.coilStartAngle - motion.coilDir * (Math.PI * 0.5) + headDrift;
+  const fwdX = Math.cos(tangentAngle);
+  const fwdY = Math.sin(tangentAngle);
+  const sideX = -fwdY * motion.coilDir;
+  const sideY = fwdX * motion.coilDir;
+
+  const distBack = (neckJoin - s) * 145; // smooth ~23px head-neck extension draping across the coil
+  const arch = Math.sin(((neckJoin - s) / neckJoin) * Math.PI) * 2.2;
+
+  return {
+    x: enterX + fwdX * distBack + sideX * arch,
+    y: enterY + fwdY * distBack + sideY * arch,
+  };
 }
 
 function buildSpine(
   cols: number,
   rows: number,
-  phase: number,
+  motion: SnakeMotionState,
   seed: number,
   mode: 'showcase' | 'roam'
 ): { nodes: SpineNode[]; dirX: number; dirY: number } {
-  const count = 58;
-  const rawPts: Array<{ x: number; y: number }> = [];
+  const count = 150;
+  const guideCount = 220;
+  const guidePts: Array<{ x: number; y: number }> = [];
 
   if (mode === 'roam') {
-    const t = phase * 0.24 + (seed % 19) * 0.35;
-    for (let i = 0; i < count; i++) {
-      const u = i / (count - 1);
-      const localT = t - u * 1.45;
-      const cx = cols * 0.5 + Math.sin(localT) * (cols * 0.28);
-      const cy =
-        rows * 0.53 +
-        Math.sin(localT * 2.0 + 0.5) * (rows * 0.2) +
-        Math.sin(localT * 5.0 - u * 8.5) * 3.0;
-      rawPts.push({ x: cx, y: cy });
+    const w = motion.coilWeight * motion.coilWeight * (3 - 2 * motion.coilWeight);
+    for (let i = 0; i < guideCount; i++) {
+      const s = i / (guideCount - 1);
+      const sl = getSlitherPoint(s, cols, rows, motion);
+      if (w > 0.005) {
+        const co = getCoilPoint(s, seed, motion);
+        guidePts.push({
+          x: sl.x * (1 - w) + co.x * w,
+          y: sl.y * (1 - w) + co.y * w,
+        });
+      } else {
+        guidePts.push(sl);
+      }
     }
   } else {
-    // Graceful top-down showcase S-curve filling frame cleanly
-    const startX = 16;
-    const endX = cols - 14;
-    const centerY = rows * 0.51;
-    for (let i = 0; i < count; i++) {
-      const u = i / (count - 1);
-      const wavePhase = u * Math.PI * 2.85 - phase * 1.05;
-      const amp = 6.5 + Math.sin(u * Math.PI) * 7.8;
-      const x = startX + u * (endX - startX) + Math.cos(wavePhase) * 2.0;
-      const y = centerY + Math.sin(wavePhase) * amp;
-      rawPts.push({ x, y });
+    // Showcase mode (Breeding / Codex): rhythmic S-curve undulation with subtle pause/head glance
+    const startX = 11;
+    const endX = cols - 10;
+    const centerY = rows * 0.5;
+    for (let i = 0; i < guideCount; i++) {
+      const s = i / (guideCount - 1);
+      const wavePhase = s * Math.PI * 3.5 - motion.travelPhase * 0.95;
+      const amp = 7.8 + Math.sin(s * Math.PI) * 10.2;
+      const glance = s < 0.12 ? Math.sin(motion.clock * 1.8) * (1 - s / 0.12) * 1.4 : 0;
+      const x = startX + s * (endX - startX) + Math.cos(wavePhase) * 2.0;
+      const y = centerY + Math.sin(wavePhase) * amp + glance;
+      guidePts.push({ x, y });
     }
   }
+
+  // Uniform arc-length resampling keeps Ball Python body length & head proportions constant around bends
+  const rawPts = resampleSpineByArcLength(
+    guidePts,
+    count,
+    mode === 'roam' ? 156 : undefined
+  );
+  const radiusScale = mode === 'roam' ? 1.0 : 0.85;
 
   const nodes: SpineNode[] = [];
   for (let i = 0; i < count; i++) {
@@ -449,15 +654,15 @@ function buildSpine(
     nodes.push({
       x: rawPts[i].x,
       y: rawPts[i].y,
-      r: getBodyRadius(u),
+      r: getBodyRadius(u, radiusScale),
       u,
       nx,
       ny,
     });
   }
 
-  const headDirX = rawPts[0].x - rawPts[2].x;
-  const headDirY = rawPts[0].y - rawPts[2].y;
+  const headDirX = rawPts[0].x - rawPts[5].x;
+  const headDirY = rawPts[0].y - rawPts[5].y;
   const hLen = Math.hypot(headDirX, headDirY) || 1;
 
   return {
@@ -474,15 +679,14 @@ function renderTopDownSnake(
   sex: Sex,
   genotype: Genotype,
   seed: number,
-  phase: number,
-  tongueOut: boolean,
+  motion: SnakeMotionState,
   mode: 'showcase' | 'roam',
   isInBlue: boolean
 ) {
   ctx.clearRect(0, 0, cols, rows);
 
   const pal = buildPalette(sex, genotype);
-  const { nodes, dirX, dirY } = buildSpine(cols, rows, phase, seed, mode);
+  const { nodes, dirX, dirY } = buildSpine(cols, rows, motion, seed, mode);
 
   const mask = new Uint8Array(cols * rows);
   const segIdx = new Int16Array(cols * rows);
@@ -490,23 +694,31 @@ function renderTopDownSnake(
 
   for (let py = 0; py < rows; py++) {
     for (let px = 0; px < cols; px++) {
+      let firstHit = -1;
       let bestDistSq = 9999;
       let bestNodeIdx = -1;
       let bestLat = 0;
       let bestR = 1;
 
       for (let i = 0; i < nodes.length; i++) {
+        // Keep earliest spine run on top so coiled head & loops draw clean 3D separating outlines
+        if (firstHit !== -1 && i > firstHit + 24) break;
+
         const n = nodes[i];
+        const maxR = n.r + 1.15;
         const dx = px + 0.5 - n.x;
+        if (dx > maxR || dx < -maxR) continue;
         const dy = py + 0.5 - n.y;
+        if (dy > maxR || dy < -maxR) continue;
+
         const d2 = dx * dx + dy * dy;
-        const maxR = n.r + 1.2;
         if (d2 <= maxR * maxR) {
+          if (firstHit === -1) firstHit = i;
           const norm = d2 / (n.r * n.r);
           if (norm < bestDistSq) {
             bestDistSq = norm;
             bestNodeIdx = i;
-            bestLat = (dx * n.nx + dy * n.ny) / Math.max(0.8, n.r);
+            bestLat = (dx * n.nx + dy * n.ny) / Math.max(0.75, n.r);
             bestR = n.r;
           }
         }
@@ -542,9 +754,9 @@ function renderTopDownSnake(
 
   // Deterministic Pied patches
   const piedAStart = 0.22 + (seed % 7) * 0.015;
-  const piedAEnd = piedAStart + 0.19;
+  const piedAEnd = piedAStart + 0.16;
   const piedBStart = 0.58 + (seed % 5) * 0.015;
-  const piedBEnd = piedBStart + 0.16;
+  const piedBEnd = piedBStart + 0.14;
 
   // Pass 2 & 3: Outline + Hyper-Detailed Top-Down Scale Patterning
   for (let py = 0; py < rows; py++) {
@@ -563,11 +775,11 @@ function renderTopDownSnake(
       const u = node.u;
       const v = latArr[idx]; // -1 (left flank) .. 0 (dorsal spine) .. +1 (right flank)
       const absV = Math.abs(v);
-      const isHead = u < 0.125;
+      const isHead = u < 0.088;
 
       // Cylindrical 3D reptile body shading + subtle micro-scale texture
       const lightCurve = 1.12 - absV * 0.32 + (v < 0 ? 0.05 : -0.04);
-      const scaleShimmer = ((Math.floor(u * 95) + Math.floor((v + 1) * 7)) % 2 === 0 ? 3 : -2);
+      const scaleShimmer = ((Math.floor(u * 145) + Math.floor((v + 1) * 6)) % 2 === 0 ? 3 : -2);
 
       // Piebald white patches
       const inPied =
@@ -577,10 +789,10 @@ function renderTopDownSnake(
 
       if (inPied) {
         const edgeBorder =
-          Math.abs(u - piedAStart) < 0.015 ||
-          Math.abs(u - piedAEnd) < 0.015 ||
-          Math.abs(u - piedBStart) < 0.015 ||
-          Math.abs(u - piedBEnd) < 0.015;
+          Math.abs(u - piedAStart) < 0.012 ||
+          Math.abs(u - piedAEnd) < 0.012 ||
+          Math.abs(u - piedBStart) < 0.012 ||
+          Math.abs(u - piedBEnd) < 0.012;
         if (edgeBorder) {
           // Real Pied hallmark: crisp dark/rich condensation ring right where white meets color
           ctx.fillStyle = shadeRgb(pal.groundDark, 0.9);
@@ -599,15 +811,15 @@ function renderTopDownSnake(
         if (!pal.isLeucistic && !pal.isSuperBlack) {
           if (pal.isClown) {
             // Clown head mask + pale teardrop/crown stamp
-            if (u > 0.035 && u < 0.105 && absV < 0.42) {
+            if (u > 0.025 && u < 0.075 && absV < 0.42) {
               headRgb = pal.saddleHighlight;
-            } else if (u > 0.05 && absV > 0.48 && absV < 0.72) {
+            } else if (u > 0.032 && absV > 0.48 && absV < 0.72) {
               headRgb = pal.outline;
             }
           } else if (pal.isPinstripe) {
-            if (u > 0.03 && absV < 0.22) {
+            if (u > 0.022 && absV < 0.22) {
               headRgb = pal.saddleHighlight;
-            } else if (u > 0.05 && absV > 0.45 && absV < 0.72) {
+            } else if (u > 0.032 && absV > 0.45 && absV < 0.72) {
               headRgb = pal.saddleMain;
             }
           } else if (pal.isBlackHead) {
@@ -617,10 +829,10 @@ function renderTopDownSnake(
             // Signature clean patternless silver-slate head
             headRgb = pal.headBase;
           } else {
-            // Classic Ball Python twin pale eye-stripes framing a darker head crown
-            if (u > 0.04 && u < 0.115 && absV > 0.38 && absV < 0.65) {
+            // Classic Ball Python twin pale post-ocular eye-stripes framing dark dorsal skull arrow
+            if (u > 0.024 && u < 0.084 && absV > 0.36 && absV < 0.68) {
               headRgb = pal.headStripe;
-            } else if (pal.isPastel && absV < 0.3 && u > 0.04 && u < 0.1) {
+            } else if (pal.isPastel && absV < 0.28 && u > 0.028 && u < 0.072) {
               headRgb = pal.headStripe; // Pastel head blushing
             }
           }
@@ -636,7 +848,7 @@ function renderTopDownSnake(
 
       if (pal.isLeucistic) {
         baseRgb = pal.groundDark;
-        if (pal.isSuperFire && Math.sin(u * 30 + seed) > 0.8 && absV < 0.55) {
+        if (pal.isSuperFire && Math.sin(u * 46 + seed) > 0.8 && absV < 0.55) {
           baseRgb = pal.saddleMain; // Super Fire bright canary patches
         }
       } else if (pal.isSuperBlack) {
@@ -650,12 +862,12 @@ function renderTopDownSnake(
                 ? pal.groundMid
                 : pal.groundDark;
         // Super Black Head subtle burnt copper dorsal flares
-        if (pal.isBlackHead && Math.sin(u * 38 + seed) > 0.55 && absV < 0.35) {
+        if (pal.isBlackHead && Math.sin(u * 56 + seed) > 0.55 && absV < 0.35) {
           baseRgb = pal.saddleRim;
         }
       } else {
         // Organic wave distortion for natural reptile pattern flow
-        const organic = Math.sin(u * 70 + v * 2.5 + seed) * 0.06;
+        const organic = Math.sin(u * 98 + v * 2.5 + seed) * 0.06;
 
         if (pal.isPinstripe) {
           // Sharp twin longitudinal golden pinstripes + fine side striping
@@ -664,28 +876,28 @@ function renderTopDownSnake(
           } else if (absV > 0.48 && absV <= 0.62) {
             baseRgb = pal.outline; // crisp dark border
           } else if (absV < 0.25) {
-            baseRgb = Math.sin(u * 55) > 0.4 ? pal.saddleMain : pal.groundMid;
-          } else if (absV > 0.76 && Math.sin(u * 48 + seed) > 0.1) {
+            baseRgb = Math.sin(u * 82) > 0.4 ? pal.saddleMain : pal.groundMid;
+          } else if (absV > 0.76 && Math.sin(u * 70 + seed) > 0.1) {
             baseRgb = pal.saddleRim;
           } else {
             baseRgb = pal.saddleMain;
           }
         } else if (pal.isClown) {
           // Thick wavy connected dorsal stripe + clean bright flanks with dark edge dots
-          const edge = 0.27 + Math.sin(u * 46 + seed) * 0.11;
+          const edge = 0.27 + Math.sin(u * 68 + seed) * 0.11;
           if (absV < edge) {
             baseRgb = absV < edge * 0.6 ? pal.saddleHighlight : pal.saddleMain;
           } else if (absV < edge + 0.16) {
             baseRgb = pal.outline; // bold dark Clown border
-          } else if (absV > 0.72 && Math.sin(u * 42 + seed) > 0.68) {
+          } else if (absV > 0.72 && Math.sin(u * 62 + seed) > 0.68) {
             baseRgb = pal.groundDark; // scattered lower side spots
           } else {
             baseRgb = pal.saddleRim;
           }
         } else if (pal.isSpider) {
           // High-white flanks + crisp thin spidery dark dorsal webbing
-          const web1 = Math.abs(Math.sin(u * 54 + v * 3.9 + seed));
-          const web2 = Math.abs(Math.cos(u * 32 - v * 4.4 + seed * 0.3));
+          const web1 = Math.abs(Math.sin(u * 78 + v * 3.9 + seed));
+          const web2 = Math.abs(Math.cos(u * 48 - v * 4.4 + seed * 0.3));
           if (absV > 0.66 + organic) {
             baseRgb = pal.flankCream;
           } else if (web1 < 0.21 || (web2 < 0.14 && absV < 0.45)) {
@@ -695,7 +907,7 @@ function renderTopDownSnake(
           }
         } else if (pal.isEnchi || pal.isWoma) {
           // Clean reduced golden-amber bands spanning across the dorsal
-          const bandVal = Math.sin(u * (pal.isEnchi ? 34 : 38) + seed * 0.7);
+          const bandVal = Math.sin(u * (pal.isEnchi ? 50 : 56) + seed * 0.7);
           if (bandVal > -0.22 + organic) {
             baseRgb =
               absV < 0.35
@@ -710,7 +922,7 @@ function renderTopDownSnake(
           // REALISTIC ALIEN HEAD SADDLES (Normal, Mojave, Lesser, Pastel, Black Pastel, Banana, Albino, Axanthic, Lavender, Hypo)
           // Each saddle cycle along u creates a pair of left & right lateral "Alien Head" ovals
           // with pale rims, golden-caramel interior, and 2 dark round "eye" spots!
-          const freq = pal.isBlackPastel ? 18 : 22;
+          const freq = pal.isBlackPastel ? 26 : 32;
           const phaseU = (u * freq + (seed % 7) * 0.23) % 1;
           const du = phaseU - 0.5; // -0.5 .. +0.5 within each saddle repeat
           const sideDist = Math.abs(absV - 0.54);
@@ -766,15 +978,15 @@ function renderTopDownSnake(
   }
 
   // Pass 4: Glossy Eyes with White Catchlight Pixel + Forked Tongue
-  const eyeNode = nodes[3];
+  const eyeNode = nodes[6];
   if (eyeNode) {
-    const eOffset = Math.max(1.8, eyeNode.r * 0.64);
-    const lx = Math.round(eyeNode.x + eyeNode.nx * eOffset);
-    const ly = Math.round(eyeNode.y + eyeNode.ny * eOffset);
-    const rx = Math.round(eyeNode.x - eyeNode.nx * eOffset);
-    const ry = Math.round(eyeNode.y - eyeNode.ny * eOffset);
+    const eOffset = Math.max(1.55, eyeNode.r * 0.48);
+    const lx = Math.round(eyeNode.x + eyeNode.nx * eOffset - 0.5);
+    const ly = Math.round(eyeNode.y + eyeNode.ny * eOffset - 0.5);
+    const rx = Math.round(eyeNode.x - eyeNode.nx * eOffset - 0.5);
+    const ry = Math.round(eyeNode.y - eyeNode.ny * eOffset - 0.5);
 
-    // 2x2 glossy eye cluster on 112x64 grid (milky sky-blue when In Blue!)
+    // Compact glossy 2x2 eyes seated inside the broad python cheeks (milky sky-blue when In Blue!)
     const irisCss = isInBlue ? '#93C5FD' : shadeRgb(pal.eyeIris, 1);
     const pupilCss = isInBlue ? '#60A5FA' : shadeRgb(pal.eyePupil, 1);
 
@@ -793,7 +1005,7 @@ function renderTopDownSnake(
     }
   }
 
-  if (tongueOut) {
+  if (motion.tongueOut) {
     const tip = nodes[0];
     ctx.fillStyle = '#FB7185';
     for (let step = 2; step <= 4; step++) {
@@ -824,8 +1036,8 @@ export const PixelSnakeSprite: React.FC<PixelSnakeSpriteProps> = ({
   className = '',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const phaseRef = useRef((seed % 20) * 0.4);
-  const tongueRef = useRef(false);
+  const motionRef = useRef<SnakeMotionState | null>(null);
+  const keyRef = useRef<string>('');
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -833,8 +1045,8 @@ export const PixelSnakeSprite: React.FC<PixelSnakeSpriteProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const cols = mode === 'roam' ? 136 : 112;
-    const rows = mode === 'roam' ? 76 : 64;
+    const cols = mode === 'roam' ? 152 : 126;
+    const rows = mode === 'roam' ? 86 : 72;
     canvas.width = cols;
     canvas.height = rows;
 
@@ -842,7 +1054,20 @@ export const PixelSnakeSprite: React.FC<PixelSnakeSpriteProps> = ({
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
+    const nextKey = `${seed}:${mode}`;
+    if (!motionRef.current || keyRef.current !== nextKey) {
+      keyRef.current = nextKey;
+      motionRef.current = createInitialMotionState(
+        seed,
+        cols,
+        rows,
+        mode,
+        animate && !prefersReducedMotion
+      );
+    }
+
     const draw = () => {
+      if (!motionRef.current) return;
       renderTopDownSnake(
         ctx,
         cols,
@@ -850,8 +1075,7 @@ export const PixelSnakeSprite: React.FC<PixelSnakeSpriteProps> = ({
         sex,
         genotype,
         seed,
-        phaseRef.current,
-        tongueRef.current,
+        motionRef.current,
         mode,
         isInBlue
       );
@@ -861,15 +1085,92 @@ export const PixelSnakeSprite: React.FC<PixelSnakeSpriteProps> = ({
 
     if (!animate || prefersReducedMotion) return;
 
-    let tickCount = 0;
+    const startCoilFromCurrentPose = (m: SnakeMotionState) => {
+      const headPt = getSlitherPoint(0, cols, rows, m);
+      const midPt = getSlitherPoint(0.28, cols, rows, m);
+      const heading = Math.atan2(headPt.y - midPt.y, headPt.x - midPt.x);
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      m.behavior = 'coil';
+      m.coilAnchorX = Math.max(cols * 0.26, Math.min(cols * 0.74, midPt.x));
+      m.coilAnchorY = Math.max(rows * 0.35, Math.min(rows * 0.65, midPt.y));
+      m.coilDir = dir;
+      m.coilTightness = 0.9 + Math.random() * 0.18;
+      m.coilStartAngle = heading + dir * (Math.PI * 0.5);
+      m.stateTimer = 4.2 + Math.random() * 4.5;
+    };
+
+    const dt = 0.065;
     const interval = setInterval(() => {
-      phaseRef.current += mode === 'roam' ? 0.12 : 0.14;
-      tickCount += 1;
-      if (tickCount % 42 === 0 && Math.random() < 0.75) {
-        tongueRef.current = true;
-      } else if (tickCount % 42 === 6) {
-        tongueRef.current = false;
+      const m = motionRef.current;
+      if (!m) return;
+
+      m.clock += dt;
+      m.stateTimer -= dt;
+
+      if (mode === 'roam') {
+        if (m.stateTimer <= 0) {
+          const r = Math.random();
+          if (m.behavior === 'slither') {
+            if (r < 0.54) {
+              startCoilFromCurrentPose(m);
+            } else {
+              // Pause to inspect surroundings & flick tongue
+              m.behavior = 'pause';
+              m.stateTimer = 1.8 + Math.random() * 2.4;
+            }
+          } else if (m.behavior === 'pause') {
+            if (r < 0.38) {
+              startCoilFromCurrentPose(m);
+            } else {
+              m.behavior = 'slither';
+              m.baseSpeed = 0.72 + Math.random() * 0.55;
+              m.stateTimer = 4.5 + Math.random() * 5.0;
+            }
+          } else {
+            // Uncoil and glide away smoothly
+            m.behavior = 'slither';
+            m.baseSpeed = 0.75 + Math.random() * 0.5;
+            m.stateTimer = 4.8 + Math.random() * 5.2;
+          }
+        }
+
+        const rhythm = 0.84 + 0.22 * Math.sin(m.clock * 1.15 + seed);
+        const targetSpeed =
+          m.behavior === 'slither'
+            ? m.baseSpeed * rhythm
+            : m.behavior === 'pause'
+              ? 0.03
+              : 0;
+        const targetCoil =
+          m.behavior === 'coil' ? 1.0 : m.behavior === 'pause' ? 0.12 : 0.0;
+
+        m.speedScale += (targetSpeed - m.speedScale) * Math.min(1, dt * 2.4);
+        m.coilWeight += (targetCoil - m.coilWeight) * Math.min(1, dt * 1.35);
+        m.travelPhase += m.speedScale * 0.095;
+      } else {
+        // Showcase: occasional brief breathing pause along S-wave
+        if (m.stateTimer <= 0) {
+          m.behavior = m.behavior === 'slither' ? 'pause' : 'slither';
+          m.stateTimer = m.behavior === 'pause' ? 1.6 + Math.random() * 1.6 : 3.5 + Math.random() * 3.5;
+        }
+        const targetSpeed = m.behavior === 'slither' ? 1.0 : 0.12;
+        m.speedScale += (targetSpeed - m.speedScale) * Math.min(1, dt * 2.8);
+        m.travelPhase += m.speedScale * 0.11;
       }
+
+      // Randomized forked-tongue flicking (more frequent while exploring/pausing)
+      m.tongueTimer -= dt;
+      if (m.tongueTimer <= 0) {
+        if (m.tongueOut) {
+          m.tongueOut = false;
+          const delay = m.behavior === 'coil' ? 3.8 + Math.random() * 4.0 : 1.6 + Math.random() * 2.8;
+          m.tongueTimer = delay;
+        } else {
+          m.tongueOut = true;
+          m.tongueTimer = 0.28 + Math.random() * 0.18;
+        }
+      }
+
       draw();
     }, 65);
 

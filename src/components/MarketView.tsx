@@ -175,8 +175,9 @@ export const MarketView: React.FC<MarketViewProps> = ({
                         sex={expoSnake.sex}
                         genotype={expoSnake.genotype}
                         seed={expoSnake.seed}
-                        width={224}
-                        height={128}
+                        width={240}
+                        height={136}
+                        mode="roam"
                         isInBlue={expoSnake.isInBlue}
                       />
                     </div>
@@ -410,8 +411,9 @@ export const MarketView: React.FC<MarketViewProps> = ({
                             sex={listing.sex}
                             genotype={listing.genotype}
                             seed={listing.seed}
-                            width={200}
-                            height={114}
+                            width={220}
+                            height={124}
+                            mode="roam"
                             animate={true}
                           />
                         </div>
