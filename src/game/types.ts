@@ -43,11 +43,6 @@ export interface GeneDefinition {
 
 export type Sex = 'M' | 'F';
 
-/**
- * Chromosomal representation for Sex-Linked Banana gene:
- * Female (XX): [x1, x2] where each allele is boolean (has Banana or not)
- * Male (XY): [x, y] where x is boolean (Banana on X) and y is boolean (Banana on Y)
- */
 export interface SexChromosomeState {
   x1: boolean; // Always X
   x2OrY: boolean; // Second X for Female, Y for Male
@@ -71,7 +66,6 @@ export type BananaStatus =
 export type MorphRarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
 
 export interface PhenotypeSummary {
-  /** Unique deterministic key for Morph Codex discovery */
   phenotypeKey: string;
   nameEn: string;
   nameTh: string;
@@ -96,13 +90,32 @@ export interface TerrariumDecorConfig {
   plant: string;
 }
 
+export interface PedigreeNode {
+  name: string;
+  morphEn: string;
+  sex: Sex;
+  sire?: PedigreeNode;
+  dam?: PedigreeNode;
+}
+
 export interface Snake {
   id: string;
   name: string;
   sex: Sex;
   genotype: Genotype;
+  /**
+   * Unconfirmed recessive possibilities for bred offspring (e.g. { albino: 66, pied: 50 }).
+   * When present and !dnaTested, the true allele (0 or 1) is hidden from player until DNA tested or proven out!
+   */
+  posHets?: Partial<Record<GeneId, number>>;
+  dnaTested?: boolean;
   ageDays: number;
   matureDays: number;
+  hunger: number; // 0..100 (100 = well fed)
+  isInBlue: boolean;
+  nextShedDay: number;
+  freshShedUntilDay: number;
+  cooldownUntilDay: number;
   isForSale: boolean;
   askingPrice: number;
   terrariumId: string;
@@ -111,6 +124,7 @@ export interface Snake {
     sireName: string;
     damName: string;
   };
+  pedigree?: PedigreeNode;
   seed: number;
   bornDay: number;
 }
@@ -125,6 +139,7 @@ export interface EggInClutch {
   id: string;
   sex: Sex;
   genotype: Genotype;
+  posHets?: Partial<Record<GeneId, number>>;
   survived: boolean;
 }
 
@@ -170,6 +185,27 @@ export interface MarketTrend {
   multiplier: number;
 }
 
+export interface ExpoTheme {
+  id: string;
+  titleTh: string;
+  descriptionTh: string;
+  focusType: 'black_complex' | 'bright_complex' | 'super' | 'recessive' | 'banana' | 'terrarium';
+  entryFee: number;
+  firstPrize: number;
+  repReward: number;
+}
+
+export interface ExpoResult {
+  day: number;
+  themeTitleTh: string;
+  snakeName: string;
+  morphEn: string;
+  score: number;
+  rank: 1 | 2 | 3 | 4;
+  prizeMoney: number;
+  repGained: number;
+}
+
 export interface EquipmentUpgrade {
   id: string;
   nameTh: string;
@@ -178,9 +214,9 @@ export interface EquipmentUpgrade {
   maxLevel: number;
   baseCost: number;
   costStep: number;
-  survivalBonusPerLevel: number; // percentage points, e.g. +5
-  clutchSizeBonusPerLevel: number; // +0.5 etc
-  growthSpeedBonusPerLevel: number; // extra age/day
+  survivalBonusPerLevel: number;
+  clutchSizeBonusPerLevel: number;
+  growthSpeedBonusPerLevel: number;
 }
 
 export interface DecorItem {
@@ -206,6 +242,8 @@ export interface GameLogEntry {
 export interface GameState {
   day: number;
   money: number;
+  reputation: number;
+  trophies: number;
   snakes: Snake[];
   terrariums: Terrarium[];
   clutches: BreedingClutch[];
@@ -227,6 +265,9 @@ export interface GameState {
     }
   >;
   marketTrend: MarketTrend;
+  currentExpo: ExpoTheme;
+  lastExpoDayEntered: number;
+  expoHistory: ExpoResult[];
   totalBred: number;
   totalSold: number;
   logs: GameLogEntry[];

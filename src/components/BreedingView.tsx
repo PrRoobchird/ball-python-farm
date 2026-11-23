@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { getFarmStatsFromEquipment } from '../game/economy';
+import { DREAM_GOALS, analyzeDreamGoal, getFarmStatsFromEquipment } from '../game/economy';
 import {
   bananaStatusLabelTh,
   evaluatePhenotype,
@@ -10,7 +10,7 @@ import {
 } from '../game/genetics';
 import { BreedingClutch, GameState, Snake } from '../game/types';
 import { PixelSnakeSprite } from './PixelSnakeSprite';
-import { Dna, Egg, Heart, Sparkles, Thermometer } from 'lucide-react';
+import { Compass, Dna, Egg, Heart, Sparkles, Thermometer } from 'lucide-react';
 
 interface BreedingViewProps {
   state: GameState;
@@ -34,8 +34,18 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
     [state.snakes]
   );
   const matureFemales = useMemo(
-    () => state.snakes.filter((s) => s.sex === 'F' && s.ageDays >= s.matureDays),
-    [state.snakes]
+    () =>
+      state.snakes.filter(
+        (s) => s.sex === 'F' && s.ageDays >= s.matureDays && s.cooldownUntilDay <= state.day
+      ),
+    [state.snakes, state.day]
+  );
+  const coolingFemales = useMemo(
+    () =>
+      state.snakes.filter(
+        (s) => s.sex === 'F' && s.ageDays >= s.matureDays && s.cooldownUntilDay > state.day
+      ),
+    [state.snakes, state.day]
   );
 
   const [sireId, setSireId] = useState<string>(
@@ -44,6 +54,8 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
   const [damId, setDamId] = useState<string>(
     preselectedDamId || matureFemales[0]?.id || ''
   );
+  const [selectedGoalId, setSelectedGoalId] = useState<string>(DREAM_GOALS[0].id);
+  const [showPlanner, setShowPlanner] = useState<boolean>(true);
 
   const sire: Snake | undefined =
     matureMales.find((m) => m.id === sireId) || matureMales[0];
@@ -56,6 +68,12 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
     if (!sire || !dam) return [];
     return predictBreedingOutcomes(sire.genotype, dam.genotype);
   }, [sire, dam]);
+
+  const activeGoal = DREAM_GOALS.find((g) => g.id === selectedGoalId) || DREAM_GOALS[0];
+  const goalAnalysis = useMemo(
+    () => analyzeDreamGoal(activeGoal, state.snakes, state.shopListings),
+    [activeGoal, state.snakes, state.shopListings]
+  );
 
   const activeClutches = state.clutches.filter((c) => !c.hatched);
   const completedClutches = state.clutches.filter((c) => c.hatched).slice(0, 4);
@@ -76,7 +94,7 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <div className="pixel-inset px-3 py-2 flex items-center gap-2">
             <Thermometer className="w-4 h-4 text-[#4ADE80]" />
             <span>
@@ -87,10 +105,17 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
           <div className="pixel-inset px-3 py-2 flex items-center gap-2">
             <Egg className="w-4 h-4 text-[#EAB308]" />
             <span>
-              จำนวนไข่ต่อครอก:{' '}
+              ไข่ต่อครอก:{' '}
               <strong className="font-mono-num text-[#EAB308]">{farmStats.clutchSize} ใบ</strong>
             </span>
           </div>
+          <button
+            onClick={() => setShowPlanner(!showPlanner)}
+            className="pixel-btn px-3.5 py-2 bg-[#2B3B32] text-[#F4F0E2] font-bold flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Compass className="w-4 h-4 text-[#38BDF8]" />
+            {showPlanner ? 'ซ่อนตัวช่วยวางแผน' : 'วางแผนมอร์ฟเป้าหมาย'}
+          </button>
           <button
             onClick={onGoToEquipment}
             className="pixel-btn px-3.5 py-2 bg-[#2B3B32] text-[#F4F0E2] font-bold whitespace-nowrap"
@@ -99,6 +124,76 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Breeding Goal Planner */}
+      {showPlanner && (
+        <div className="pixel-panel p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Compass className="w-4 h-4 text-[#38BDF8]" />
+              <h3 className="text-sm font-bold text-[#F4F0E2]">
+                ตัวช่วยวางแผนมอร์ฟเป้าหมาย (Breeding Goal Planner)
+              </h3>
+            </div>
+            <select
+              value={selectedGoalId}
+              onChange={(e) => setSelectedGoalId(e.target.value)}
+              className="pixel-inset px-3 py-1.5 text-xs text-[#F4F0E2] focus:outline-none focus:border-[#38BDF8]"
+            >
+              {DREAM_GOALS.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.nameEn} ({g.difficultyTh})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            <div className="md:col-span-8 pixel-inset p-3.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-[#EAB308]">
+                  {activeGoal.nameEn} · {activeGoal.nameTh}
+                </span>
+                <span className="font-mono-num text-xs font-bold text-[#4ADE80]">
+                  ความพร้อมยีนในฟาร์ม {goalAnalysis.readinessPct}%
+                </span>
+              </div>
+              <div className="h-2 w-full bg-[#1C2621] border border-black">
+                <div
+                  className="h-full bg-[#4ADE80] transition-all"
+                  style={{ width: `${goalAnalysis.readinessPct}%` }}
+                />
+              </div>
+              <p className="text-xs text-[#9BA89E]">{activeGoal.descriptionTh}</p>
+              <div className="text-xs text-[#D1D5DB]">
+                คำแนะนำ: <span className="text-[#38BDF8] font-medium">{goalAnalysis.adviceTh}</span>
+              </div>
+            </div>
+
+            <div className="md:col-span-4 space-y-2 text-xs">
+              {goalAnalysis.bestSire && goalAnalysis.bestDam && (
+                <button
+                  onClick={() => {
+                    setSireId(goalAnalysis.bestSire!.id);
+                    setDamId(goalAnalysis.bestDam!.id);
+                  }}
+                  className="pixel-btn w-full py-2.5 px-3 bg-[#365341] text-[#F4F0E2] font-bold whitespace-nowrap"
+                >
+                  เลือกคู่ที่แนะนำลงช่องผสม
+                </button>
+              )}
+              <div className="pixel-inset p-2.5 text-[11px] text-[#9BA89E]">
+                ยีนที่มีแล้ว: {goalAnalysis.ownedKeys.join(', ') || 'ยังไม่มี'}
+                {goalAnalysis.missingKeys.length > 0 && (
+                  <div className="text-[#F59E0B] mt-0.5">
+                    ยังขาด: {goalAnalysis.missingKeys.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Parent Pairing Selector */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -121,7 +216,10 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                 className="pixel-inset w-full px-3 py-2 text-sm text-[#F4F0E2] focus:outline-none focus:border-[#38BDF8]"
               >
                 {matureMales.map((m) => {
-                  const ph = evaluatePhenotype(m.sex, m.genotype);
+                  const ph = evaluatePhenotype(m.sex, m.genotype, {
+                    posHets: m.posHets,
+                    dnaTested: m.dnaTested,
+                  });
                   return (
                     <option key={m.id} value={m.id}>
                       {m.name} — {ph.nameEn}
@@ -139,13 +237,20 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                       seed={sire.seed}
                       width={196}
                       height={110}
+                      isInBlue={sire.isInBlue}
                     />
                   </div>
                   <div className="text-sm font-bold text-[#F4F0E2]">
-                    {evaluatePhenotype(sire.sex, sire.genotype).nameEn}
+                    {evaluatePhenotype(sire.sex, sire.genotype, {
+                      posHets: sire.posHets,
+                      dnaTested: sire.dnaTested,
+                    }).nameEn}
                   </div>
                   <div className="text-xs text-[#EAB308]">
-                    {evaluatePhenotype(sire.sex, sire.genotype).nameTh}
+                    {evaluatePhenotype(sire.sex, sire.genotype, {
+                      posHets: sire.posHets,
+                      dnaTested: sire.dnaTested,
+                    }).nameTh}
                   </div>
                   {sireBanana !== 'none' && (
                     <div className="text-xs text-[#C084FC] font-semibold">
@@ -166,8 +271,8 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
             </div>
             <h3 className="text-base font-bold text-[#F4F0E2]">จับคู่ผสมพันธุ์</h3>
             <p className="text-xs text-[#9BA89E] leading-relaxed">
-              ลูกงูในครอกจะใช้เวลาฟัก <span className="font-mono-num text-[#F4F0E2]">3 วัน</span> ในตู้ฟักไข่
-              อย่าลืมอัปเกรดตู้ฟักเพื่อเพิ่มโอกาสรอดสูงสุด 98%
+              ลูกงูในครอกใช้เวลาฟัก <span className="font-mono-num text-[#F4F0E2]">3 วัน</span> และแม่พันธุ์จะพักฟื้นหลังวางไข่{' '}
+              <span className="font-mono-num text-[#F4F0E2]">2 วัน</span>
             </p>
           </div>
 
@@ -184,6 +289,12 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                 {damBanana !== 'none' &&
                   ' แม่ Banana (X^B) สามารถส่งยีนให้ได้ทั้งลูกชายและลูกสาว โดยลูกชายที่ได้ยีนจากแม่จะเป็น Banana X!'}
               </p>
+            </div>
+          )}
+
+          {coolingFemales.length > 0 && (
+            <div className="text-[11px] text-[#F59E0B] text-center">
+              มีแม่พันธุ์ {coolingFemales.length} ตัวกำลังพักฟื้นหลังวางไข่
             </div>
           )}
 
@@ -206,7 +317,9 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
 
           {matureFemales.length === 0 ? (
             <div className="pixel-inset p-4 text-xs text-[#9BA89E] text-center">
-              ยังไม่มีงูเพศเมียที่โตเต็มวัย ซื้อจากตลาดหรือรอให้งูโตก่อน
+              {coolingFemales.length > 0
+                ? 'แม่พันธุ์ทั้งหมดกำลังพักฟื้นหลังวางไข่ กด "วันถัดไป" เพื่อรอฟื้นตัว'
+                : 'ยังไม่มีงูเพศเมียที่โตเต็มวัย ซื้อจากตลาดหรือรอให้งูโตก่อน'}
             </div>
           ) : (
             <>
@@ -216,7 +329,10 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                 className="pixel-inset w-full px-3 py-2 text-sm text-[#F4F0E2] focus:outline-none focus:border-[#FB7185]"
               >
                 {matureFemales.map((f) => {
-                  const ph = evaluatePhenotype(f.sex, f.genotype);
+                  const ph = evaluatePhenotype(f.sex, f.genotype, {
+                    posHets: f.posHets,
+                    dnaTested: f.dnaTested,
+                  });
                   return (
                     <option key={f.id} value={f.id}>
                       {f.name} — {ph.nameEn}
@@ -234,13 +350,20 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                       seed={dam.seed}
                       width={196}
                       height={110}
+                      isInBlue={dam.isInBlue}
                     />
                   </div>
                   <div className="text-sm font-bold text-[#F4F0E2]">
-                    {evaluatePhenotype(dam.sex, dam.genotype).nameEn}
+                    {evaluatePhenotype(dam.sex, dam.genotype, {
+                      posHets: dam.posHets,
+                      dnaTested: dam.dnaTested,
+                    }).nameEn}
                   </div>
                   <div className="text-xs text-[#EAB308]">
-                    {evaluatePhenotype(dam.sex, dam.genotype).nameTh}
+                    {evaluatePhenotype(dam.sex, dam.genotype, {
+                      posHets: dam.posHets,
+                      dnaTested: dam.dnaTested,
+                    }).nameTh}
                   </div>
                   {damBanana !== 'none' && (
                     <div className="text-xs text-[#C084FC] font-semibold">
@@ -351,7 +474,6 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                     </span>
                   </div>
 
-                  {/* Pixel Egg Row */}
                   <div className="flex items-center gap-2 py-1">
                     {clutch.eggs.map((egg) => (
                       <div
@@ -411,7 +533,12 @@ export const BreedingView: React.FC<BreedingViewProps> = ({
                   </div>
                   <div className="text-[#9BA89E] truncate">
                     {survived
-                      .map((e) => evaluatePhenotype(e.sex, e.genotype).nameEn)
+                      .map((e) =>
+                        evaluatePhenotype(e.sex, e.genotype, {
+                          posHets: e.posHets,
+                          dnaTested: false,
+                        }).nameEn
+                      )
                       .join(', ') || 'ไม่มีลูกงูรอดในครอกนี้ — อัปเกรดตู้ฟักเพื่อเพิ่มโอกาสรอด'}
                   </div>
                 </div>

@@ -5,6 +5,7 @@ import {
   computeDailySaleChance,
   getTerrariumAppealBonus,
 } from '../game/economy';
+import { downloadMorphCardPng } from '../game/exportCard';
 import {
   evaluatePhenotype,
   getGeneListForDisplay,
@@ -12,14 +13,20 @@ import {
   getRarityLabelTh,
 } from '../game/genetics';
 import { COMPLEX_LABEL_TH } from '../game/genes';
-import {
-  DecorSlot,
-  GameState,
-  Snake,
-  TerrariumDecorConfig,
-} from '../game/types';
+import { DecorSlot, GameState, Snake } from '../game/types';
 import { TerrariumCanvas } from './TerrariumCanvas';
-import { Dna, HeartHandshake, Paintbrush, Plus, Store, Tag } from 'lucide-react';
+import {
+  Dna,
+  Download,
+  GitBranch,
+  HeartHandshake,
+  Paintbrush,
+  Plus,
+  Sparkles,
+  Store,
+  Tag,
+  Utensils,
+} from 'lucide-react';
 
 interface FarmViewProps {
   state: GameState;
@@ -27,6 +34,8 @@ interface FarmViewProps {
   onToggleSale: (snakeId: string, isForSale: boolean, askingPrice: number) => void;
   onUpdateDecor: (terrariumId: string, slot: DecorSlot, decorId: string) => void;
   onRenameSnake: (snakeId: string, name: string) => void;
+  onFeedSnake: (snakeId: string) => void;
+  onDnaTestSnake: (snakeId: string) => void;
   onSendToBreeding: (snake: Snake) => void;
   onGoToShop: () => void;
   onGoToEquipment: () => void;
@@ -45,6 +54,8 @@ export const FarmView: React.FC<FarmViewProps> = ({
   onToggleSale,
   onUpdateDecor,
   onRenameSnake,
+  onFeedSnake,
+  onDnaTestSnake,
   onSendToBreeding,
   onGoToShop,
   onGoToEquipment,
@@ -76,16 +87,35 @@ export const FarmView: React.FC<FarmViewProps> = ({
   const emptyTerrariumsCount = Math.max(0, state.terrariums.length - state.snakes.length);
   const nextTerrariumCost = 2200 + Math.max(0, state.terrariums.length - 2) * 800;
 
-  // Compute inspector metrics
   const selectedPheno = selectedSnake
-    ? evaluatePhenotype(selectedSnake.sex, selectedSnake.genotype)
+    ? evaluatePhenotype(selectedSnake.sex, selectedSnake.genotype, {
+        posHets: selectedSnake.posHets,
+        dnaTested: selectedSnake.dnaTested,
+      })
     : null;
   const selectedGenes = selectedSnake
-    ? getGeneListForDisplay(selectedSnake.sex, selectedSnake.genotype)
+    ? getGeneListForDisplay(selectedSnake.sex, selectedSnake.genotype, {
+        posHets: selectedSnake.posHets,
+        dnaTested: selectedSnake.dnaTested,
+      })
     : [];
+  const hasPendingPosHets =
+    selectedSnake &&
+    !selectedSnake.dnaTested &&
+    selectedSnake.posHets &&
+    Object.keys(selectedSnake.posHets).length > 0;
+
   const decorAppeal = selectedTerrarium ? getTerrariumAppealBonus(selectedTerrarium.decor) : 0;
   const valuation = selectedSnake
-    ? calculateMarketValue(selectedSnake.sex, selectedSnake.genotype, state.marketTrend, decorAppeal)
+    ? calculateMarketValue(
+        selectedSnake.sex,
+        selectedSnake.genotype,
+        state.marketTrend,
+        decorAppeal,
+        state.reputation,
+        selectedSnake.posHets,
+        selectedSnake.dnaTested
+      )
     : null;
 
   const effectivePrice =
@@ -100,10 +130,13 @@ export const FarmView: React.FC<FarmViewProps> = ({
             effectivePrice,
             valuation.finalMarketPrice,
             valuation.matchesTrend,
-            decorAppeal
+            decorAppeal,
+            state.reputation
           ) * 100
         )
       : 0;
+
+  const inspectorCanvasId = selectedSnake ? `inspector-snake-${selectedSnake.id}` : undefined;
 
   return (
     <div className="space-y-6">
@@ -114,9 +147,13 @@ export const FarmView: React.FC<FarmViewProps> = ({
             โรงเรือนและตู้เลี้ยงงู ({state.snakes.length}/{state.terrariums.length} ตู้)
           </h2>
           <p className="text-sm text-[#9BA89E]">
-            ตู้ว่างพร้อมรับงูใหม่: <span className="font-mono-num text-[#4ADE80] font-semibold">{emptyTerrariumsCount}</span> ตู้
+            ตู้ว่างพร้อมรับงูใหม่:{' '}
+            <span className="font-mono-num text-[#4ADE80] font-semibold">{emptyTerrariumsCount}</span> ตู้
             <span className="mx-2" aria-hidden="true">·</span>
-            กดเลือกงูแต่ละตู้เพื่อปรับแต่งฉากหลัง ตั้งราคาขาย หรือส่งเข้าผสมพันธุ์
+            ชื่อเสียงฟาร์ม <span className="font-mono-num text-[#EAB308] font-semibold">{state.reputation}</span>
+            {state.reputation > 0 && (
+              <span> (+{Math.min(40, Math.round(state.reputation * 0.2))}% มูลค่าขาย)</span>
+            )}
           </p>
         </div>
 
@@ -139,7 +176,6 @@ export const FarmView: React.FC<FarmViewProps> = ({
         </div>
       </div>
 
-      {/* Empty State when player starts with 0 snakes */}
       {state.snakes.length === 0 ? (
         <div className="pixel-panel p-8 text-center space-y-4">
           <div className="font-pixel text-xl text-[#F59E0B]">EMPTY TERRARIUM RACK</div>
@@ -147,8 +183,9 @@ export const FarmView: React.FC<FarmViewProps> = ({
             ฟาร์มของคุณพร้อมแล้ว — เริ่มต้นเลือกซื้องูคู่แรกจากตลาด
           </h3>
           <p className="text-sm text-[#9BA89E] max-w-xl mx-auto leading-relaxed">
-            คุณมีงบเริ่มต้น <span className="font-mono-num text-[#4ADE80] font-bold">฿{state.money.toLocaleString()}</span> และตู้เลี้ยงว่าง {state.terrariums.length} ตู้
-            ลองเข้าไปเลือกซื้อสายพันธุ์จาก 4 ร้านค้าที่มีทั้งงูแบบดั้งเดิม ยีนเด่น ยีนด้อย (Het) โทนเข้ม Black Complex และ Banana X/Y ตามงบประมาณของคุณ
+            คุณมีงบเริ่มต้น{' '}
+            <span className="font-mono-num text-[#4ADE80] font-bold">฿{state.money.toLocaleString()}</span> และตู้เลี้ยงว่าง{' '}
+            {state.terrariums.length} ตู้ ลองเข้าไปเลือกซื้อสายพันธุ์จาก 4 ร้านค้าที่มีทั้งงูแบบดั้งเดิม ยีนเด่น ยีนด้อย (Het) โทนเข้ม Black Complex และ Banana X/Y ตามงบประมาณของคุณ
           </p>
           <div className="pt-2">
             <button
@@ -165,11 +202,15 @@ export const FarmView: React.FC<FarmViewProps> = ({
           {/* Left: Terrarium Grid */}
           <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {state.snakes.map((snake) => {
-              const pheno = evaluatePhenotype(snake.sex, snake.genotype);
+              const pheno = evaluatePhenotype(snake.sex, snake.genotype, {
+                posHets: snake.posHets,
+                dnaTested: snake.dnaTested,
+              });
               const terrarium =
                 state.terrariums.find((t) => t.id === snake.terrariumId) || state.terrariums[0];
               const isSelected = selectedSnake?.id === snake.id;
               const isMature = snake.ageDays >= snake.matureDays;
+              const isFreshShed = state.day <= snake.freshShedUntilDay && !snake.isInBlue;
 
               return (
                 <button
@@ -187,6 +228,7 @@ export const FarmView: React.FC<FarmViewProps> = ({
                     seed={snake.seed}
                     decor={terrarium?.decor || state.terrariums[0].decor}
                     compact={true}
+                    isInBlue={snake.isInBlue}
                   />
 
                   <div className="mt-3 space-y-1">
@@ -207,11 +249,23 @@ export const FarmView: React.FC<FarmViewProps> = ({
 
                     <div className="flex items-center justify-between text-xs text-[#9BA89E] pt-1">
                       <span className="truncate">
-                        {isMature ? 'พร้อมผสมพันธุ์' : `ลูกงู (${snake.ageDays}/${snake.matureDays} วัน)`}
-                        <span className="mx-1.5" aria-hidden="true">·</span>
+                        {isMature ? 'โตเต็มวัย' : `ลูกงู (${snake.ageDays}/${snake.matureDays} วัน)`}
+                        <span className="mx-1" aria-hidden="true">·</span>
                         <span className={getRarityColorClass(pheno.rarity)}>
                           {getRarityLabelTh(pheno.rarity)}
                         </span>
+                        {snake.isInBlue && (
+                          <>
+                            <span className="mx-1" aria-hidden="true">·</span>
+                            <span className="text-[#93C5FD]">ตาขุ่นเตรียมลอกคราบ</span>
+                          </>
+                        )}
+                        {isFreshShed && (
+                          <>
+                            <span className="mx-1" aria-hidden="true">·</span>
+                            <span className="text-[#4ADE80]">คราบใหม่สีสด</span>
+                          </>
+                        )}
                       </span>
                       {snake.isForSale && (
                         <span className="font-mono-num text-[#4ADE80] font-bold shrink-0">
@@ -227,7 +281,7 @@ export const FarmView: React.FC<FarmViewProps> = ({
 
           {/* Right: Selected Snake & Terrarium Inspector */}
           {selectedSnake && selectedPheno && selectedTerrarium && valuation && (
-            <div className="lg:col-span-5 pixel-panel p-5 space-y-5 lg:sticky lg:top-4">
+            <div className="lg:col-span-5 pixel-panel p-5 space-y-4 lg:sticky lg:top-4">
               {/* Header + Name Edit */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -277,14 +331,32 @@ export const FarmView: React.FC<FarmViewProps> = ({
                   </div>
                 </div>
 
-                <button
-                  onClick={() => onSendToBreeding(selectedSnake)}
-                  disabled={selectedSnake.ageDays < selectedSnake.matureDays}
-                  className="pixel-btn px-3 py-2 bg-[#365341] text-[#F4F0E2] text-xs font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
-                >
-                  <HeartHandshake className="w-4 h-4 text-[#4ADE80]" />
-                  นำไปผสมพันธุ์
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      const canvasEl = inspectorCanvasId
+                        ? (document.getElementById(inspectorCanvasId) as HTMLCanvasElement | null)
+                        : null;
+                      downloadMorphCardPng(selectedSnake, canvasEl, state.reputation);
+                    }}
+                    className="pixel-btn px-2.5 py-2 bg-[#232F28] text-[#EAB308] text-xs font-bold flex items-center gap-1 whitespace-nowrap"
+                    title="ดาวน์โหลดการ์ดงู PNG สำหรับแชร์"
+                  >
+                    <Download className="w-4 h-4" />
+                    การ์ด PNG
+                  </button>
+                  <button
+                    onClick={() => onSendToBreeding(selectedSnake)}
+                    disabled={
+                      selectedSnake.ageDays < selectedSnake.matureDays ||
+                      selectedSnake.cooldownUntilDay > state.day
+                    }
+                    className="pixel-btn px-3 py-2 bg-[#365341] text-[#F4F0E2] text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <HeartHandshake className="w-4 h-4 text-[#4ADE80]" />
+                    ผสมพันธุ์
+                  </button>
+                </div>
               </div>
 
               {/* Full Terrarium Preview */}
@@ -294,11 +366,57 @@ export const FarmView: React.FC<FarmViewProps> = ({
                 seed={selectedSnake.seed}
                 decor={selectedTerrarium.decor}
                 compact={false}
+                isInBlue={selectedSnake.isInBlue}
+                canvasId={inspectorCanvasId}
               />
 
-              {/* Genetics Breakdown */}
+              {/* Health, Feeding & Shedding Bar */}
+              <div className="pixel-inset p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-3">
+                    <span>
+                      ความอิ่ม:{' '}
+                      <strong
+                        className={`font-mono-num ${
+                          selectedSnake.hunger >= 60
+                            ? 'text-[#4ADE80]'
+                            : selectedSnake.hunger >= 30
+                              ? 'text-[#EAB308]'
+                              : 'text-[#FB7185]'
+                        }`}
+                      >
+                        {selectedSnake.hunger}%
+                      </strong>
+                    </span>
+                    <span className="text-[#9BA89E]">·</span>
+                    <span>
+                      {selectedSnake.isInBlue
+                        ? 'กำลังตาขุ่น (เตรียมลอกคราบวันถัดไป)'
+                        : state.day <= selectedSnake.freshShedUntilDay
+                          ? 'เพิ่งลอกคราบใหม่ (สีสดพิเศษสำหรับประกวด)'
+                          : `รอบลอกคราบถัดไป: วันที่ ${selectedSnake.nextShedDay}`}
+                    </span>
+                  </div>
+                  {selectedSnake.cooldownUntilDay > state.day && (
+                    <div className="text-[#F59E0B]">
+                      แม่พันธุ์พักฟื้นหลังวางไข่ (พร้อมผสมอีก {selectedSnake.cooldownUntilDay - state.day} วัน)
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => onFeedSnake(selectedSnake.id)}
+                  disabled={state.money < 60 || selectedSnake.hunger >= 98}
+                  className="pixel-btn px-3 py-1.5 bg-[#2A3B31] text-[#F4F0E2] font-bold flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                >
+                  <Utensils className="w-3.5 h-3.5 text-[#EAB308]" />
+                  ให้อาหาร (฿60)
+                </button>
+              </div>
+
+              {/* Genetics Breakdown + Shed DNA Test */}
               <div className="pixel-inset p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-bold text-[#EAB308] flex items-center gap-1.5">
                     <Dna className="w-4 h-4" />
                     ข้อมูลพันธุกรรม (Genotype)
@@ -310,21 +428,14 @@ export const FarmView: React.FC<FarmViewProps> = ({
                   </span>
                 </div>
 
-                <div className="text-sm font-semibold text-[#F4F0E2]">
-                  {selectedPheno.nameTh}
-                </div>
-                <div className="text-xs text-[#9BA89E] font-mono-num">
-                  {selectedPheno.nameEn}
-                </div>
+                <div className="text-sm font-semibold text-[#F4F0E2]">{selectedPheno.nameTh}</div>
+                <div className="text-xs text-[#9BA89E] font-mono-num">{selectedPheno.nameEn}</div>
 
                 {selectedGenes.length > 0 ? (
                   <div className="pt-1.5 border-t border-[#2D3B33] space-y-1">
                     {selectedGenes.map((g, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center justify-between text-xs"
-                      >
-                        <span className={g.isHet ? 'text-[#9BA89E]' : 'text-[#F4F0E2]'}>
+                      <div key={idx} className="flex items-center justify-between text-xs">
+                        <span className={g.isPosHet ? 'text-[#F59E0B]' : g.isHet ? 'text-[#9BA89E]' : 'text-[#F4F0E2]'}>
                           {g.nameTh}
                         </span>
                         <span
@@ -333,9 +444,11 @@ export const FarmView: React.FC<FarmViewProps> = ({
                               ? 'text-[#F59E0B] font-bold'
                               : g.isSexLinked
                                 ? 'text-[#C084FC]'
-                                : g.isHet
-                                  ? 'text-[#9BA89E]'
-                                  : 'text-[#4ADE80]'
+                                : g.isPosHet
+                                  ? 'text-[#F59E0B]'
+                                  : g.isHet
+                                    ? 'text-[#9BA89E]'
+                                    : 'text-[#4ADE80]'
                           }`}
                         >
                           {g.stateLabel}
@@ -349,9 +462,70 @@ export const FarmView: React.FC<FarmViewProps> = ({
                   </div>
                 )}
 
-                {selectedSnake.parents && (
-                  <div className="text-xs text-[#9BA89E] pt-1.5 border-t border-[#2D3B33]">
-                    สายเลือด: พ่อ {selectedSnake.parents.sireName} × แม่ {selectedSnake.parents.damName}
+                {hasPendingPosHets && (
+                  <div className="pt-2 border-t border-[#2D3B33] flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-[#9BA89E]">
+                      มียีนแฝง (Pos Het) ที่ยังไม่ยืนยัน สามารถส่งคราบตรวจ DNA ได้
+                    </span>
+                    <button
+                      onClick={() => onDnaTestSnake(selectedSnake.id)}
+                      disabled={state.money < 650}
+                      className="pixel-btn px-3 py-1.5 bg-[#3B2F4A] text-[#E9D5FF] text-xs font-bold flex items-center gap-1 whitespace-nowrap shrink-0"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      ตรวจคราบ DNA (฿650)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 3-Generation Pedigree Tree */}
+              <div className="pixel-inset p-3.5 space-y-2">
+                <div className="text-xs font-bold text-[#38BDF8] flex items-center gap-1.5">
+                  <GitBranch className="w-4 h-4" />
+                  ผังสายเลือด (Pedigree Tree)
+                </div>
+
+                {selectedSnake.pedigree ? (
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-[#19221D] border border-[#2D3B33] p-2 space-y-1">
+                      <div className="text-[#38BDF8] font-bold">สายพ่อ (Sire)</div>
+                      <div className="text-[#F4F0E2] font-semibold truncate">
+                        {selectedSnake.pedigree.sire?.name}
+                      </div>
+                      <div className="text-[#9BA89E] truncate">
+                        {selectedSnake.pedigree.sire?.morphEn}
+                      </div>
+                      {(selectedSnake.pedigree.sire?.sire || selectedSnake.pedigree.sire?.dam) && (
+                        <div className="pt-1 border-t border-[#2A3730] text-[10px] text-[#9BA89E]">
+                          ปู่: {selectedSnake.pedigree.sire?.sire?.morphEn || '-'} · ย่า:{' '}
+                          {selectedSnake.pedigree.sire?.dam?.morphEn || '-'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="bg-[#19221D] border border-[#2D3B33] p-2 space-y-1">
+                      <div className="text-[#FB7185] font-bold">สายแม่ (Dam)</div>
+                      <div className="text-[#F4F0E2] font-semibold truncate">
+                        {selectedSnake.pedigree.dam?.name}
+                      </div>
+                      <div className="text-[#9BA89E] truncate">
+                        {selectedSnake.pedigree.dam?.morphEn}
+                      </div>
+                      {(selectedSnake.pedigree.dam?.sire || selectedSnake.pedigree.dam?.dam) && (
+                        <div className="pt-1 border-t border-[#2A3730] text-[10px] text-[#9BA89E]">
+                          ตา: {selectedSnake.pedigree.dam?.sire?.morphEn || '-'} · ยาย:{' '}
+                          {selectedSnake.pedigree.dam?.dam?.morphEn || '-'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : selectedSnake.parents ? (
+                  <div className="text-xs text-[#9BA89E]">
+                    พ่อ: {selectedSnake.parents.sireName} × แม่: {selectedSnake.parents.damName}
+                  </div>
+                ) : (
+                  <div className="text-xs text-[#9BA89E]">
+                    สายพันธุ์ตั้งต้นนำเข้าจากตลาด (Foundation Breeder)
                   </div>
                 )}
               </div>
@@ -385,7 +559,9 @@ export const FarmView: React.FC<FarmViewProps> = ({
                     className="pixel-card px-3 py-1.5 text-sm font-mono-num text-[#F4F0E2] w-full focus:outline-none focus:border-[#EAB308]"
                   />
                   <button
-                    onClick={() => setCustomPriceInput(Math.round(valuation.finalMarketPrice * 0.85 / 50) * 50)}
+                    onClick={() =>
+                      setCustomPriceInput(Math.round((valuation.finalMarketPrice * 0.85) / 50) * 50)
+                    }
                     className="pixel-btn px-2.5 py-1.5 bg-[#27352D] text-xs text-[#F4F0E2] whitespace-nowrap"
                   >
                     ขายไว
@@ -399,8 +575,12 @@ export const FarmView: React.FC<FarmViewProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-[#9BA89E]">
-                  <span>โอกาสขายได้ต่อวัน: <strong className="font-mono-num text-[#F4F0E2]">{saleChancePct}%</strong></span>
-                  <span>ความสวยงามตู้: <strong className="font-mono-num text-[#EAB308]">+{decorAppeal}</strong></span>
+                  <span>
+                    โอกาสขายได้ต่อวัน: <strong className="font-mono-num text-[#F4F0E2]">{saleChancePct}%</strong>
+                  </span>
+                  <span>
+                    ความสวยงามตู้: <strong className="font-mono-num text-[#EAB308]">+{decorAppeal}</strong>
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">

@@ -3,9 +3,12 @@ import { emptyGenotype, evaluatePhenotype, getBananaStatus } from './genetics';
 import {
   DecorItem,
   EquipmentUpgrade,
+  ExpoResult,
+  ExpoTheme,
   GeneId,
   Genotype,
   MarketTrend,
+  PedigreeNode,
   Sex,
   ShopDefinition,
   ShopId,
@@ -92,6 +95,133 @@ export const MARKET_TRENDS: MarketTrend[] = [
   },
 ];
 
+export const EXPO_THEMES: ExpoTheme[] = [
+  {
+    id: 'expo_black',
+    titleTh: 'Thailand Black Complex Cup',
+    descriptionTh: 'ประกวดความคมเข้มของมอร์ฟโทนดำ (Black Pastel, Black Head, Headless Axanthic, Cinnamon)',
+    focusType: 'black_complex',
+    entryFee: 250,
+    firstPrize: 2800,
+    repReward: 20,
+  },
+  {
+    id: 'expo_bright',
+    titleTh: 'Bright & White Morph Showdown',
+    descriptionTh: 'เวทีโชว์สีสันสดใสและงูขาวตาฟ้า/ตาดำ (Pastel, Enchi, Mojave, Lesser, Fire)',
+    focusType: 'bright_complex',
+    entryFee: 250,
+    firstPrize: 2800,
+    repReward: 20,
+  },
+  {
+    id: 'expo_super',
+    titleTh: 'Super Form Masters Expo',
+    descriptionTh: 'ประชันงู Super Form ที่เข้าคู่ยีนเด่นร่วมครบทั้ง 2 ชุด',
+    focusType: 'super',
+    entryFee: 350,
+    firstPrize: 4200,
+    repReward: 28,
+  },
+  {
+    id: 'expo_recessive',
+    titleTh: 'Recessive Royalty Classic',
+    descriptionTh: 'ประกวดยีนด้อยแท้ (Albino, Piebald, Clown, Lavender, Axanthic, Hypo)',
+    focusType: 'recessive',
+    entryFee: 350,
+    firstPrize: 4500,
+    repReward: 30,
+  },
+  {
+    id: 'expo_banana',
+    titleTh: 'Banana Genetics Showcase',
+    descriptionTh: 'ประชันงูสายพันธุ์ Banana (X/Y) และคอมโบสีเหลืองกล้วย',
+    focusType: 'banana',
+    entryFee: 300,
+    firstPrize: 3500,
+    repReward: 24,
+  },
+  {
+    id: 'expo_terrarium',
+    titleTh: 'Bioactive Vivarium & Health Award',
+    descriptionTh: 'ให้คะแนนความสวยงามของตู้เลี้ยง สุขภาพงู และการลอกคราบที่สมบูรณ์แบบ',
+    focusType: 'terrarium',
+    entryFee: 200,
+    firstPrize: 2400,
+    repReward: 18,
+  },
+];
+
+export interface DreamMorphGoal {
+  id: string;
+  nameEn: string;
+  nameTh: string;
+  difficultyTh: string;
+  descriptionTh: string;
+  requiredAlleles: Partial<Record<GeneId, 1 | 2>>;
+  requireBanana?: boolean;
+}
+
+export const DREAM_GOALS: DreamMorphGoal[] = [
+  {
+    id: 'goal_bel',
+    nameEn: 'Blue-Eyed Leucistic (BEL)',
+    nameTh: 'งูขาวตาฟ้า (BEL)',
+    difficultyTh: 'ระดับกลาง · 1–2 รุ่น',
+    descriptionTh: 'ใช้ Mojave × Mojave หรือ Lesser × Lesser หรือ Mojave × Lesser (ได้ลูก BEL ทันที 25%)',
+    requiredAlleles: { mojave: 1, lesser: 1 },
+  },
+  {
+    id: 'goal_bumblebee',
+    nameEn: 'Bumblebee (Pastel Spider)',
+    nameTh: 'บัมเบิลบี (พาสเทล สไปเดอร์)',
+    difficultyTh: 'เริ่มต้นง่าย · 1 รุ่น',
+    descriptionTh: 'จับคู่ Pastel × Spider ให้โอกาสเกิด Bumblebee 25% ทันทีในครอกแรก',
+    requiredAlleles: { pastel: 1, spider: 1 },
+  },
+  {
+    id: 'goal_super_black_head',
+    nameEn: 'Super Black Head',
+    nameTh: 'ซูเปอร์ แบล็กเฮด',
+    difficultyTh: 'ระดับกลาง · 1–2 รุ่น',
+    descriptionTh: 'จับคู่ Black Head × Black Head ได้ Super Black Head 25% ในกลุ่ม Black Complex',
+    requiredAlleles: { black_head: 2 },
+  },
+  {
+    id: 'goal_super_headless_ax',
+    nameEn: 'Super Headless Axanthic',
+    nameTh: 'ซูเปอร์ เฮดเลส แอกแซนทิก',
+    difficultyTh: 'ระดับกลาง · 1–2 รุ่น',
+    descriptionTh: 'จับคู่ Headless Axanthic × Headless Axanthic ได้ Super Form สีเทาชาร์โคลเข้ม 25%',
+    requiredAlleles: { headless_axanthic: 2 },
+  },
+  {
+    id: 'goal_snow',
+    nameEn: 'Snow (Albino Axanthic)',
+    nameTh: 'สโนว์ (อัลไบโน แอกแซนทิก)',
+    difficultyTh: 'ระดับสูง · 2 รุ่น (F2)',
+    descriptionTh: 'ต้องมียีนด้อย Albino และ Axanthic ครบทั้ง 2 ชุด (2+2) จากการผสมข้ามรุ่น',
+    requiredAlleles: { albino: 2, axanthic: 2 },
+  },
+  {
+    id: 'goal_panda_pied',
+    nameEn: 'Panda Pied (Super Black Pastel Pied)',
+    nameTh: 'แพนด้าพาย (ซูเปอร์ แบล็กพาสเทล พายบอลด์)',
+    difficultyTh: 'ระดับตำนาน · 2–3 รุ่น',
+    descriptionTh: 'เป้าหมายยอดฮิตในวงการ: Super Black Pastel + Piebald แท้ เกิดเป็นงูสีขาวตัดดำสนิท!',
+    requiredAlleles: { black_pastel: 2, pied: 2 },
+  },
+  {
+    id: 'goal_banana_pastel_clown',
+    nameEn: 'Banana Pastel Clown',
+    nameTh: 'บานาน่า พาสเทล คลาวน์',
+    difficultyTh: 'ระดับตำนาน · 2–3 รุ่น',
+    descriptionTh: 'รวมยีนโครโมโซมเพศ Banana + Pastel + ยีนด้อย Clown แท้ (2 ชุด)',
+    requiredAlleles: { pastel: 1, clown: 2 },
+    requireBanana: true,
+  },
+];
+
 export const EQUIPMENT_UPGRADES: EquipmentUpgrade[] = [
   {
     id: 'incubator_pro',
@@ -132,7 +262,6 @@ export const EQUIPMENT_UPGRADES: EquipmentUpgrade[] = [
 ];
 
 export const DECOR_ITEMS: DecorItem[] = [
-  // Substrates
   {
     id: 'sub_paper',
     slot: 'substrate',
@@ -181,8 +310,6 @@ export const DECOR_ITEMS: DecorItem[] = [
     appealBonus: 12,
     previewColor: '#272E36',
   },
-
-  // Backdrops
   {
     id: 'bg_rack',
     slot: 'backdrop',
@@ -231,8 +358,6 @@ export const DECOR_ITEMS: DecorItem[] = [
     appealBonus: 14,
     previewColor: '#151B2E',
   },
-
-  // Hides
   {
     id: 'hide_plastic',
     slot: 'hide',
@@ -281,8 +406,6 @@ export const DECOR_ITEMS: DecorItem[] = [
     appealBonus: 15,
     previewColor: '#8B7B58',
   },
-
-  // Plants & Props
   {
     id: 'plant_none',
     slot: 'plant',
@@ -345,8 +468,8 @@ export function getEquipmentCost(eq: EquipmentUpgrade, currentLevel: number): nu
 }
 
 export function getFarmStatsFromEquipment(equipmentLevels: Record<string, number>) {
-  let survivalRate = 64; // Starter tub baseline 64%
-  let clutchSize = 4; // Base 4 eggs
+  let survivalRate = 64;
+  let clutchSize = 4;
   let growthBonus = 0;
 
   for (const eq of EQUIPMENT_UPGRADES) {
@@ -398,17 +521,28 @@ export function calculateMarketValue(
   sex: Sex,
   genotype: Genotype,
   trend: MarketTrend,
-  decorAppeal = 0
-): { basePrice: number; trendMultiplier: number; finalMarketPrice: number; matchesTrend: boolean } {
-  const pheno = evaluatePhenotype(sex, genotype);
+  decorAppeal = 0,
+  reputation = 0,
+  posHets?: Partial<Record<GeneId, number>>,
+  dnaTested?: boolean
+): {
+  basePrice: number;
+  trendMultiplier: number;
+  repMultiplier: number;
+  finalMarketPrice: number;
+  matchesTrend: boolean;
+} {
+  const pheno = evaluatePhenotype(sex, genotype, { posHets, dnaTested });
   const matchesTrend = doesMorphMatchTrend(sex, genotype, trend);
   const trendMultiplier = matchesTrend ? trend.multiplier : 1.0;
-  const appealMultiplier = 1 + decorAppeal * 0.005; // up to ~+25% market appeal from nice tank!
-  const raw = pheno.basePrice * trendMultiplier * appealMultiplier;
+  const appealMultiplier = 1 + decorAppeal * 0.005;
+  const repMultiplier = 1 + Math.min(0.4, reputation * 0.002); // up to +40% at 200 rep
+  const raw = pheno.basePrice * trendMultiplier * appealMultiplier * repMultiplier;
   const finalMarketPrice = Math.round(raw / 50) * 50;
   return {
     basePrice: pheno.basePrice,
     trendMultiplier,
+    repMultiplier,
     finalMarketPrice,
     matchesTrend,
   };
@@ -418,7 +552,8 @@ export function computeDailySaleChance(
   askingPrice: number,
   marketValue: number,
   matchesTrend: boolean,
-  decorAppeal: number
+  decorAppeal: number,
+  reputation = 0
 ): number {
   if (askingPrice <= 0) return 0;
   const ratio = askingPrice / Math.max(1, marketValue);
@@ -432,7 +567,223 @@ export function computeDailySaleChance(
 
   if (matchesTrend) baseChance += 0.14;
   baseChance += decorAppeal * 0.003;
-  return Math.max(0.02, Math.min(0.95, baseChance));
+  baseChance += Math.min(0.12, reputation * 0.0006);
+  return Math.max(0.02, Math.min(0.96, baseChance));
+}
+
+export function scoreSnakeForExpo(
+  snake: Snake,
+  theme: ExpoTheme,
+  decorAppeal: number,
+  day: number
+): ExpoResult {
+  const pheno = evaluatePhenotype(snake.sex, snake.genotype, {
+    posHets: snake.posHets,
+    dnaTested: snake.dnaTested,
+  });
+
+  let score = 40;
+  score += pheno.visualGeneCount * 10;
+  score += pheno.superCount * 14;
+  score += Math.round(decorAppeal * 0.8);
+  score += snake.hunger >= 75 ? 8 : snake.hunger >= 40 ? 3 : -8;
+
+  if (snake.isInBlue) {
+    score -= 10; // In blue cloudy eyes slightly dull colors
+  } else if (day <= snake.freshShedUntilDay) {
+    score += 15; // Fresh shed vibrant iridescent sheen!
+  }
+
+  let matchesTheme = false;
+  if (theme.focusType === 'black_complex' && pheno.complex === 'black_complex') matchesTheme = true;
+  if (theme.focusType === 'bright_complex' && pheno.complex === 'bright_complex') matchesTheme = true;
+  if (theme.focusType === 'super' && pheno.superCount > 0) matchesTheme = true;
+  if (theme.focusType === 'banana' && pheno.bananaStatus !== 'none') matchesTheme = true;
+  if (
+    theme.focusType === 'recessive' &&
+    AUTOSOMAL_GENES.some(
+      (g) => g.inheritance === 'recessive' && (snake.genotype.alleles[g.id as GeneId] || 0) === 2
+    )
+  ) {
+    matchesTheme = true;
+  }
+  if (theme.focusType === 'terrarium' && decorAppeal >= 16) matchesTheme = true;
+
+  if (matchesTheme) score += 28;
+  score += Math.floor(Math.random() * 11); // judge variance
+
+  // Rival benchmark scores
+  const firstThreshold = 104;
+  const secondThreshold = 84;
+  const thirdThreshold = 66;
+
+  let rank: 1 | 2 | 3 | 4 = 4;
+  let prizeMoney = 0;
+  let repGained = 2;
+
+  if (score >= firstThreshold) {
+    rank = 1;
+    prizeMoney = theme.firstPrize;
+    repGained = theme.repReward;
+  } else if (score >= secondThreshold) {
+    rank = 2;
+    prizeMoney = Math.round(theme.firstPrize * 0.5);
+    repGained = Math.round(theme.repReward * 0.6);
+  } else if (score >= thirdThreshold) {
+    rank = 3;
+    prizeMoney = Math.round(theme.firstPrize * 0.25);
+    repGained = Math.round(theme.repReward * 0.35);
+  }
+
+  return {
+    day,
+    themeTitleTh: theme.titleTh,
+    snakeName: snake.name,
+    morphEn: pheno.specialComboName || pheno.nameEn,
+    score,
+    rank,
+    prizeMoney,
+    repGained,
+  };
+}
+
+export function analyzeDreamGoal(
+  goal: DreamMorphGoal,
+  snakes: Snake[],
+  shopListings: ShopListing[]
+): {
+  readinessPct: number;
+  ownedKeys: string[];
+  missingKeys: string[];
+  bestSire?: Snake;
+  bestDam?: Snake;
+  recommendedShop?: ShopListing;
+  adviceTh: string;
+} {
+  const requiredGenes = Object.entries(goal.requiredAlleles) as Array<[GeneId, 1 | 2]>;
+  const totalPoints = requiredGenes.reduce((sum, [, count]) => sum + count, 0) + (goal.requireBanana ? 1 : 0);
+
+  const countOwnedOnSnake = (s: Snake | ShopListing, posHets?: Partial<Record<GeneId, number>>, dnaTested?: boolean) => {
+    let pts = 0;
+    const keys: string[] = [];
+    for (const [gid, needed] of requiredGenes) {
+      const actual = s.genotype.alleles[gid] || 0;
+      const masked = !dnaTested && posHets?.[gid];
+      const known = masked ? 0 : actual;
+      const contrib = Math.min(needed, known);
+      if (contrib > 0) {
+        pts += contrib;
+        keys.push(`${gid}:${contrib}`);
+      }
+    }
+    if (goal.requireBanana && getBananaStatus(s.sex, s.genotype) !== 'none') {
+      pts += 1;
+      keys.push('banana');
+    }
+    return { pts, keys };
+  };
+
+  // Check coverage across farm (how many target alleles we have on at least one Male & Female)
+  let bestSire: Snake | undefined;
+  let bestSirePts = 0;
+  let bestDam: Snake | undefined;
+  let bestDamPts = 0;
+
+  const ownedGenePool = new Set<string>();
+
+  for (const s of snakes) {
+    const res = countOwnedOnSnake(s, s.posHets, s.dnaTested);
+    res.keys.forEach((k) => ownedGenePool.add(k));
+    if (s.sex === 'M' && res.pts > bestSirePts) {
+      bestSirePts = res.pts;
+      bestSire = s;
+    }
+    if (s.sex === 'F' && res.pts > bestDamPts) {
+      bestDamPts = res.pts;
+      bestDam = s;
+    }
+  }
+
+  // Compute readiness across farm
+  let coveredPoints = 0;
+  const ownedKeys: string[] = [];
+  const missingKeys: string[] = [];
+
+  for (const [gid, needed] of requiredGenes) {
+    const maxMale = snakes
+      .filter((s) => s.sex === 'M')
+      .reduce((m, s) => Math.max(m, (!s.dnaTested && s.posHets?.[gid]) ? 0 : (s.genotype.alleles[gid] || 0)), 0);
+    const maxFemale = snakes
+      .filter((s) => s.sex === 'F')
+      .reduce((m, s) => Math.max(m, (!s.dnaTested && s.posHets?.[gid]) ? 0 : (s.genotype.alleles[gid] || 0)), 0);
+
+    if (needed === 2) {
+      const havePair = Math.min(1, maxMale) + Math.min(1, maxFemale);
+      coveredPoints += havePair;
+      if (havePair === 2) ownedKeys.push(`${gid} (ครบคู่พ่อ-แม่)`);
+      else if (havePair === 1) {
+        ownedKeys.push(`${gid} (มี 1 ฝั่ง)`);
+        missingKeys.push(`${gid} อีก 1 ฝั่ง`);
+      } else {
+        missingKeys.push(`${gid} (ทั้งพ่อและแม่)`);
+      }
+    } else {
+      const haveOne = maxMale >= 1 || maxFemale >= 1 ? 1 : 0;
+      coveredPoints += haveOne;
+      if (haveOne === 1) ownedKeys.push(gid);
+      else missingKeys.push(gid);
+    }
+  }
+
+  if (goal.requireBanana) {
+    const hasBan = snakes.some((s) => getBananaStatus(s.sex, s.genotype) !== 'none');
+    if (hasBan) {
+      coveredPoints += 1;
+      ownedKeys.push('Banana');
+    } else {
+      missingKeys.push('Banana');
+    }
+  }
+
+  const readinessPct = Math.round((coveredPoints / Math.max(1, totalPoints)) * 100);
+
+  // Recommend best shop listing containing missing genes
+  let recommendedShop: ShopListing | undefined;
+  let bestShopScore = 0;
+  if (missingKeys.length > 0) {
+    for (const l of shopListings) {
+      let score = 0;
+      for (const [gid, needed] of requiredGenes) {
+        const cnt = l.genotype.alleles[gid] || 0;
+        if (cnt > 0) score += Math.min(needed, cnt);
+      }
+      if (goal.requireBanana && getBananaStatus(l.sex, l.genotype) !== 'none') score += 1;
+      if (score > bestShopScore) {
+        bestShopScore = score;
+        recommendedShop = l;
+      }
+    }
+  }
+
+  let adviceTh = '';
+  if (readinessPct === 100 && bestSire && bestDam) {
+    adviceTh = `พร้อมผสมแล้ว! ลองจับคู่ ${bestSire.name} (♂) × ${bestDam.name} (♀) เพื่อลุ้น ${goal.nameEn}`;
+  } else if (recommendedShop) {
+    const ph = evaluatePhenotype(recommendedShop.sex, recommendedShop.genotype);
+    adviceTh = `ยังขาดยีนสำคัญ: ลองซื้อ "${ph.nameEn}" (${recommendedShop.sex === 'M' ? '♂' : '♀'}) จากตลาดในราคา ฿${recommendedShop.price.toLocaleString()}`;
+  } else {
+    adviceTh = `สะสมพ่อแม่พันธุ์ที่มีกลุ่มยีนเป้าหมายจากตลาด หรือรีเฟรชร้านค้าเพื่อหามอร์ฟตั้งต้น`;
+  }
+
+  return {
+    readinessPct,
+    ownedKeys,
+    missingKeys,
+    bestSire,
+    bestDam,
+    recommendedShop,
+    adviceTh,
+  };
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -465,9 +816,8 @@ function makeListing(
 export function generateDailyShopInventory(): ShopListing[] {
   const listings: ShopListing[] = [];
 
-  // 1. Starter & Classic Shop (6 snakes: budget-friendly ฿1,050 - ฿4,800)
+  // 1. Starter & Classic Shop
   {
-    // Always have at least 1 affordable Normal Female & Male
     listings.push(makeListing('starter_classic', 'F', emptyGenotype(), 0.92, true));
     listings.push(makeListing('starter_classic', 'M', emptyGenotype(), 0.9, true));
 
@@ -480,10 +830,8 @@ export function generateDailyShopInventory(): ShopListing[] {
       if (i < 2) {
         g.alleles[pickRandom(starterGenes)] = 1;
       } else if (i === 2) {
-        // Het Recessive budget gem!
         g.alleles[pickRandom(hetGenes)] = 1;
       } else {
-        // Single gene + Het recessive
         g.alleles[pickRandom(starterGenes)] = 1;
         if (Math.random() < 0.7) g.alleles[pickRandom(hetGenes)] = 1;
       }
@@ -491,7 +839,7 @@ export function generateDailyShopInventory(): ShopListing[] {
     }
   }
 
-  // 2. Black Complex Shop (5 snakes)
+  // 2. Black Complex Shop
   {
     const blackGenes: GeneId[] = ['black_pastel', 'black_head', 'headless_axanthic', 'cinnamon'];
     const supportGenes: GeneId[] = ['pastel', 'mojave', 'fire', 'pinstripe'];
@@ -500,7 +848,6 @@ export function generateDailyShopInventory(): ShopListing[] {
       const sex: Sex = i % 2 === 0 ? 'M' : 'F';
       const mainGene = blackGenes[i % blackGenes.length];
       if (i === 4 && Math.random() < 0.55) {
-        // Occasional Super Black form
         g.alleles[mainGene] = 2;
       } else {
         g.alleles[mainGene] = 1;
@@ -515,9 +862,8 @@ export function generateDailyShopInventory(): ShopListing[] {
     }
   }
 
-  // 3. Bright & Recessive Lab (6 snakes - includes Banana X & Banana Y!)
+  // 3. Bright & Recessive Lab
   {
-    // Always offer at least one Banana X (Female Maker) or Banana Y (Male Maker)
     const banX = emptyGenotype();
     banX.banana = { x1: true, x2OrY: false };
     listings.push(makeListing('bright_recessive', 'M', banX, 1.0, true));
@@ -533,15 +879,12 @@ export function generateDailyShopInventory(): ShopListing[] {
       const g = emptyGenotype();
       const sex: Sex = i % 2 === 0 ? 'F' : 'M';
       if (i === 0) {
-        // Banana Female or Banana combo
         if (sex === 'F') g.banana = { x1: true, x2OrY: false };
         else g.banana = Math.random() < 0.5 ? { x1: true, x2OrY: false } : { x1: false, x2OrY: true };
         if (Math.random() < 0.5) g.alleles[pickRandom(brightCodoms)] = 1;
       } else if (i === 1) {
-        // Visual Recessive
         g.alleles[pickRandom(recessives)] = 2;
       } else if (i === 2) {
-        // BEL gene (Mojave or Lesser) + Het recessive
         g.alleles[Math.random() < 0.5 ? 'mojave' : 'lesser'] = 1;
         g.alleles[pickRandom(recessives)] = 1;
       } else {
@@ -554,7 +897,7 @@ export function generateDailyShopInventory(): ShopListing[] {
     }
   }
 
-  // 4. Rare Morph Auction (4 high-tier multi-gene / Super / Double visual)
+  // 4. Rare Morph Auction
   {
     const allCodoms: GeneId[] = ['black_pastel', 'black_head', 'headless_axanthic', 'pastel', 'mojave', 'lesser', 'fire', 'enchi'];
     const doms: GeneId[] = ['pinstripe', 'spider', 'woma', 'calico'];
@@ -564,21 +907,17 @@ export function generateDailyShopInventory(): ShopListing[] {
       const g = emptyGenotype();
       const sex: Sex = i % 2 === 0 ? 'F' : 'M';
       if (i === 0) {
-        // Super form + 1 gene
         g.alleles[pickRandom(allCodoms)] = 2;
         g.alleles[pickRandom(doms)] = 1;
       } else if (i === 1) {
-        // Visual Recessive + Co-dom
         g.alleles[pickRandom(recs)] = 2;
         g.alleles[pickRandom(allCodoms)] = 1;
       } else if (i === 2) {
-        // Banana Multi-gene
         if (sex === 'F') g.banana = { x1: true, x2OrY: Math.random() < 0.2 };
         else g.banana = Math.random() < 0.5 ? { x1: true, x2OrY: false } : { x1: false, x2OrY: true };
         g.alleles[pickRandom(allCodoms)] = 1;
         g.alleles[pickRandom(recs)] = Math.random() < 0.4 ? 2 : 1;
       } else {
-        // Triple gene powerhouse
         g.alleles[pickRandom(allCodoms)] = 1;
         g.alleles[pickRandom(doms)] = 1;
         g.alleles[pickRandom(recs)] = 2;
@@ -594,30 +933,42 @@ export function createNewSnakeFromGenotype(params: {
   name?: string;
   sex: Sex;
   genotype: Genotype;
+  posHets?: Partial<Record<GeneId, number>>;
   ageDays: number;
   matureDays: number;
   terrariumId: string;
   origin: 'shop' | 'bred';
   parents?: { sireName: string; damName: string };
+  pedigree?: PedigreeNode;
   bornDay: number;
   seed?: number;
 }): Snake {
-  const pheno = evaluatePhenotype(params.sex, params.genotype);
-  const autoName =
-    params.name ||
-    `${pheno.specialComboName || pheno.nameEn.split(' Het ')[0]} #${Math.floor(100 + Math.random() * 899)}`;
+  const pheno = evaluatePhenotype(params.sex, params.genotype, {
+    posHets: params.posHets,
+    dnaTested: false,
+  });
+  const baseTitle = pheno.specialComboName || pheno.nameEn.split(' Het ')[0].split(' 50%')[0].split(' 66%')[0];
+  const autoName = params.name || `${baseTitle} #${Math.floor(100 + Math.random() * 899)}`;
   return {
     id: `snk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     name: autoName,
     sex: params.sex,
     genotype: params.genotype,
+    posHets: params.posHets,
+    dnaTested: !params.posHets || Object.keys(params.posHets).length === 0,
     ageDays: params.ageDays,
     matureDays: params.matureDays,
+    hunger: 92,
+    isInBlue: false,
+    nextShedDay: params.bornDay + 4 + Math.floor(Math.random() * 2),
+    freshShedUntilDay: params.bornDay + 1,
+    cooldownUntilDay: 0,
     isForSale: false,
     askingPrice: pheno.basePrice,
     terrariumId: params.terrariumId,
     origin: params.origin,
     parents: params.parents,
+    pedigree: params.pedigree,
     seed: params.seed ?? Math.floor(Math.random() * 100000),
     bornDay: params.bornDay,
   };

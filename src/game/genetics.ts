@@ -6,8 +6,10 @@ import {
   GeneId,
   Genotype,
   MorphRarity,
+  PedigreeNode,
   PhenotypeSummary,
   Sex,
+  Snake,
 } from './types';
 
 export function emptyGenotype(): Genotype {
@@ -31,7 +33,6 @@ export function getBananaStatus(sex: Sex, genotype: Genotype): BananaStatus {
     if (x1 || x2OrY) return 'banana_female';
     return 'none';
   }
-  // Male (x1 = X, x2OrY = Y)
   if (x1 && x2OrY) return 'super_banana_male';
   if (x1 && !x2OrY) return 'banana_x_male';
   if (!x1 && x2OrY) return 'banana_y_male';
@@ -71,13 +72,24 @@ export function bananaStatusShortEn(status: BananaStatus): string {
   }
 }
 
-export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummary {
+export interface PhenotypeOptions {
+  posHets?: Partial<Record<GeneId, number>>;
+  dnaTested?: boolean;
+}
+
+export function evaluatePhenotype(
+  sex: Sex,
+  genotype: Genotype,
+  options?: PhenotypeOptions
+): PhenotypeSummary {
   const visualEn: string[] = [];
   const visualTh: string[] = [];
   const hetEn: string[] = [];
   const hetTh: string[] = [];
   const keyParts: string[] = [];
   const traits: string[] = [];
+
+  const posHets = !options?.dnaTested ? options?.posHets : undefined;
 
   let visualGeneCount = 0;
   let superCount = 0;
@@ -86,7 +98,6 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
   let brightScore = 0;
   let valueMultiplier = 1;
 
-  // Sex-linked Banana first in name if present
   const bananaStatus = getBananaStatus(sex, genotype);
   if (bananaStatus !== 'none') {
     const isSuper =
@@ -121,19 +132,26 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
     }
   }
 
-  // Check allelic BEL combo (Mojave + Lesser)
   const mojCount = genotype.alleles.mojave || 0;
   const lesCount = genotype.alleles.lesser || 0;
   const isBelAllelic = mojCount === 1 && lesCount === 1;
 
-  // Iterate genes in deterministic order
   for (const gene of AUTOSOMAL_GENES) {
     const id = gene.id as GeneId;
     const count = genotype.alleles[id] || 0;
+    const posPct = posHets?.[id];
+
+    if (gene.inheritance === 'recessive' && count !== 2 && posPct) {
+      // Mask hidden allele behind Pos Het percentage until DNA tested / proven out
+      hetEn.push(`${posPct}% Pos Het ${gene.nameEn}`);
+      hetTh.push(`${posPct}% Pos Het ${gene.nameTh}`);
+      valueMultiplier *= posPct >= 66 ? 1.12 : 1.07;
+      continue;
+    }
+
     if (count === 0) continue;
 
     if (gene.inheritance === 'dominant') {
-      // Visual whether 1 or 2
       visualGeneCount += 1;
       visualEn.push(gene.nameEn);
       visualTh.push(gene.nameTh);
@@ -175,14 +193,13 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
         else brightScore += 2;
       } else {
         hetCount += 1;
-        hetEn.push(gene.nameEn);
-        hetTh.push(gene.nameTh);
+        hetEn.push(`Het ${gene.nameEn}`);
+        hetTh.push(`100% Het ${gene.nameTh}`);
         valueMultiplier *= 1.18;
       }
     }
   }
 
-  // Famous Designer Combo Names!
   let specialComboName: string | undefined;
   const has = (id: GeneId, min = 1) => (genotype.alleles[id] || 0) >= min;
   const hasBan = bananaStatus !== 'none';
@@ -225,10 +242,10 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
   }
 
   if (hetEn.length > 0) {
-    nameEn = `${nameEn} Het ${hetEn.join(' / ')}`;
+    nameEn = `${nameEn} ${hetEn.join(' / ')}`;
   }
 
-  const hetLabelTh = hetTh.length > 0 ? `แฝงยีนด้อย (Het): ${hetTh.join(', ')}` : '';
+  const hetLabelTh = hetTh.length > 0 ? `ยีนด้อยแฝง: ${hetTh.join(', ')}` : '';
 
   let complex: ColorComplex = 'normal';
   if (visualGeneCount > 0) {
@@ -241,7 +258,6 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
     }
   }
 
-  // Rarity tier calculation
   let rarity: MorphRarity = 'Common';
   const totalPower = visualGeneCount + superCount * 1.2 + hetCount * 0.35;
   if (totalPower >= 5.5 || (superCount >= 1 && visualGeneCount >= 4)) {
@@ -256,7 +272,6 @@ export function evaluatePhenotype(sex: Sex, genotype: Genotype): PhenotypeSummar
     rarity = 'Uncommon';
   }
 
-  // Base market price in THB
   const comboSynergy = 1 + Math.max(0, visualGeneCount - 1) * 0.25 + superCount * 0.2;
   const rawPrice = 1100 * valueMultiplier * comboSynergy;
   const basePrice = Math.round(rawPrice / 50) * 50;
@@ -285,22 +300,17 @@ export interface PunnettOutcome {
   hetLabelTh: string;
   sex: Sex | 'M/F';
   bananaStatus: BananaStatus;
-  probability: number; // 0..1
+  probability: number;
   rarity: MorphRarity;
   estimatedPrice: number;
   sampleGenotype: Genotype;
   sampleSex: Sex;
 }
 
-/**
- * Computes exact genetic offspring distribution for Sire (M) x Dam (F)
- * Handles Dominant, Recessive, Co-dominant, and Sex-Linked Banana X/Y!
- */
 export function predictBreedingOutcomes(
   sireGenotype: Genotype,
   damGenotype: Genotype
 ): PunnettOutcome[] {
-  // 1. Autosomal distribution per gene
   type AlleleDist = Array<{ count: 0 | 1 | 2; prob: number }>;
   const activeGenes: GeneId[] = [];
   const geneDists: Record<string, AlleleDist> = {};
@@ -331,7 +341,6 @@ export function predictBreedingOutcomes(
     geneDists[id] = dist;
   }
 
-  // 2. Sex-linked Banana distribution (Sire X/Y x Dam X/X)
   const sX = sireGenotype.banana.x1;
   const sY = sireGenotype.banana.x2OrY;
   const dX1 = damGenotype.banana.x1;
@@ -344,8 +353,6 @@ export function predictBreedingOutcomes(
     prob: number;
   }
 
-  // Sire passes X (daughter) 50%, Y (son) 50%
-  // Dam passes dX1 50%, dX2 50%
   const rawSexOutcomes: SexBananaOutcome[] = [
     { sex: 'F', x1: sX, x2OrY: dX1, prob: 0.25 },
     { sex: 'F', x1: sX, x2OrY: dX2, prob: 0.25 },
@@ -353,10 +360,8 @@ export function predictBreedingOutcomes(
     { sex: 'M', x1: dX2, x2OrY: sY, prob: 0.25 },
   ];
 
-  // Merge identical sex+banana states
   const mergedSexMap = new Map<string, SexBananaOutcome>();
   for (const o of rawSexOutcomes) {
-    // Normalize female order so [true, false] == [false, true]
     const normX1 = o.sex === 'F' ? o.x1 || o.x2OrY : o.x1;
     const normX2OrY = o.sex === 'F' ? o.x1 && o.x2OrY : o.x2OrY;
     const k = `${o.sex}:${normX1 ? 1 : 0}:${normX2OrY ? 1 : 0}`;
@@ -369,7 +374,6 @@ export function predictBreedingOutcomes(
   }
   const sexOutcomes = Array.from(mergedSexMap.values());
 
-  // 3. Combine autosomal distributions (limit explosion safely if someone pairs 8+ genes)
   interface ComboState {
     alleles: Partial<Record<GeneId, 1 | 2>>;
     prob: number;
@@ -391,7 +395,6 @@ export function predictBreedingOutcomes(
     combos = next;
   }
 
-  // Group by visible phenotype + het + sex-specific banana status
   const hasAnyBanana = sX || sY || dX1 || dX2;
   const resultMap = new Map<string, PunnettOutcome>();
 
@@ -403,7 +406,6 @@ export function predictBreedingOutcomes(
       };
       const pheno = evaluatePhenotype(s.sex, geno);
       const prob = c.prob * s.prob;
-      // Group M/F together unless Banana is involved (since Banana X vs Y matters for sex!)
       const groupSex: Sex | 'M/F' = hasAnyBanana ? s.sex : 'M/F';
       const groupKey = `${pheno.nameEn}__${groupSex}__${pheno.bananaStatus}`;
       const existing = resultMap.get(groupKey);
@@ -430,9 +432,6 @@ export function predictBreedingOutcomes(
   return Array.from(resultMap.values()).sort((a, b) => b.probability - a.probability);
 }
 
-/**
- * Samples a realistic clutch of eggs from Sire x Dam using Mendelian + Sex-Linked probabilities
- */
 export function generateClutchEggs(
   sireGenotype: Genotype,
   damGenotype: Genotype,
@@ -443,6 +442,7 @@ export function generateClutchEggs(
 
   for (let i = 0; i < clutchSize; i++) {
     const alleles: Partial<Record<GeneId, 1 | 2>> = {};
+    const posHets: Partial<Record<GeneId, number>> = {};
 
     for (const gene of AUTOSOMAL_GENES) {
       const id = gene.id as GeneId;
@@ -456,19 +456,26 @@ export function generateClutchEggs(
       if (total === 1 || total === 2) {
         alleles[id] = total;
       }
+
+      // Compute realistic Possible Het probability for non-visual recessive babies!
+      if (gene.inheritance === 'recessive' && total !== 2) {
+        if (sCount === 1 && dCount === 1) {
+          posHets[id] = 66; // Het x Het non-visual = 66% Pos Het
+        } else if ((sCount === 1 && dCount === 0) || (sCount === 0 && dCount === 1)) {
+          posHets[id] = 50; // Het x Normal = 50% Pos Het
+        }
+        // Note: Visual(2) x Normal(0) = 100% guaranteed Het -> no uncertainty!
+      }
     }
 
-    // Sex-linked Banana
     const sex: Sex = Math.random() < 0.5 ? 'F' : 'M';
     const damPass = Math.random() < 0.5 ? damGenotype.banana.x1 : damGenotype.banana.x2OrY;
     let x1 = false;
     let x2OrY = false;
     if (sex === 'F') {
-      // Inherits X from Sire + X from Dam
       x1 = sireGenotype.banana.x1;
       x2OrY = damPass;
     } else {
-      // Inherits Y from Sire + X from Dam
       x1 = damPass;
       x2OrY = sireGenotype.banana.x2OrY;
     }
@@ -482,6 +489,7 @@ export function generateClutchEggs(
         alleles,
         banana: { x1, x2OrY },
       },
+      posHets: Object.keys(posHets).length > 0 ? posHets : undefined,
       survived,
     });
   }
@@ -489,7 +497,11 @@ export function generateClutchEggs(
   return eggs;
 }
 
-export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
+export function getGeneListForDisplay(
+  sex: Sex,
+  genotype: Genotype,
+  options?: PhenotypeOptions
+) {
   const list: Array<{
     nameEn: string;
     nameTh: string;
@@ -497,8 +509,11 @@ export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
     stateLabel: string;
     isSuper: boolean;
     isHet: boolean;
+    isPosHet: boolean;
     isSexLinked: boolean;
   }> = [];
+
+  const posHets = !options?.dnaTested ? options?.posHets : undefined;
 
   const banana = getBananaStatus(sex, genotype);
   if (banana !== 'none') {
@@ -510,6 +525,7 @@ export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
       stateLabel: isSuper ? 'Super' : banana === 'banana_x_male' ? 'X-Linked' : banana === 'banana_y_male' ? 'Y-Linked' : 'X-Linked',
       isSuper,
       isHet: false,
+      isPosHet: false,
       isSexLinked: true,
     });
   }
@@ -517,16 +533,33 @@ export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
   for (const g of AUTOSOMAL_GENES) {
     const id = g.id as GeneId;
     const count = genotype.alleles[id] || 0;
+    const posPct = posHets?.[id];
+
+    if (g.inheritance === 'recessive' && count !== 2 && posPct) {
+      list.push({
+        nameEn: `${posPct}% Pos Het ${g.nameEn}`,
+        nameTh: `${posPct}% Pos Het ${g.nameTh}`,
+        inheritance: g.inheritance,
+        stateLabel: `รอตรวจ DNA / Prove Out`,
+        isSuper: false,
+        isHet: true,
+        isPosHet: true,
+        isSexLinked: false,
+      });
+      continue;
+    }
+
     if (count === 0) continue;
 
     if (g.inheritance === 'recessive') {
       list.push({
         nameEn: count === 2 ? g.nameEn : `Het ${g.nameEn}`,
-        nameTh: count === 2 ? g.nameTh : `Het ${g.nameTh}`,
+        nameTh: count === 2 ? g.nameTh : `100% Het ${g.nameTh}`,
         inheritance: g.inheritance,
-        stateLabel: count === 2 ? 'Visual (แท้)' : 'Het (พาหะ)',
+        stateLabel: count === 2 ? 'Visual (แท้)' : '100% Het (ยืนยัน)',
         isSuper: false,
         isHet: count === 1,
+        isPosHet: false,
         isSexLinked: false,
       });
     } else if (g.inheritance === 'codominant') {
@@ -537,6 +570,7 @@ export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
         stateLabel: count === 2 ? 'Super Form' : 'Single Gene',
         isSuper: count === 2,
         isHet: false,
+        isPosHet: false,
         isSexLinked: false,
       });
     } else {
@@ -547,12 +581,49 @@ export function getGeneListForDisplay(sex: Sex, genotype: Genotype) {
         stateLabel: 'Dominant',
         isSuper: false,
         isHet: false,
+        isPosHet: false,
         isSexLinked: false,
       });
     }
   }
 
   return list;
+}
+
+export function buildPedigreeFromParents(sire: Snake, dam: Snake): {
+  sireNode: PedigreeNode;
+  damNode: PedigreeNode;
+} {
+  const toGrandparent = (node?: PedigreeNode): PedigreeNode | undefined => {
+    if (!node) return undefined;
+    return { name: node.name, morphEn: node.morphEn, sex: node.sex };
+  };
+
+  const sirePheno = evaluatePhenotype(sire.sex, sire.genotype, {
+    posHets: sire.posHets,
+    dnaTested: sire.dnaTested,
+  });
+  const damPheno = evaluatePhenotype(dam.sex, dam.genotype, {
+    posHets: dam.posHets,
+    dnaTested: dam.dnaTested,
+  });
+
+  return {
+    sireNode: {
+      name: sire.name,
+      morphEn: sirePheno.specialComboName || sirePheno.nameEn.split(' Het ')[0],
+      sex: 'M',
+      sire: toGrandparent(sire.pedigree?.sire),
+      dam: toGrandparent(sire.pedigree?.dam),
+    },
+    damNode: {
+      name: dam.name,
+      morphEn: damPheno.specialComboName || damPheno.nameEn.split(' Het ')[0],
+      sex: 'F',
+      sire: toGrandparent(dam.pedigree?.sire),
+      dam: toGrandparent(dam.pedigree?.dam),
+    },
+  };
 }
 
 export function getRarityColorClass(rarity: MorphRarity): string {

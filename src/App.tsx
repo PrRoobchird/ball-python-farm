@@ -9,6 +9,7 @@ import {
   DECOR_ITEMS,
   DEFAULT_DECOR,
   EQUIPMENT_UPGRADES,
+  EXPO_THEMES,
   MARKET_TRENDS,
   calculateMarketValue,
   computeDailySaleChance,
@@ -17,19 +18,24 @@ import {
   getEquipmentCost,
   getFarmStatsFromEquipment,
   getTerrariumAppealBonus,
+  scoreSnakeForExpo,
 } from './game/economy';
 import {
+  buildPedigreeFromParents,
   evaluatePhenotype,
   generateClutchEggs,
   getRarityColorClass,
   getRarityLabelTh,
 } from './game/genetics';
+import { AUTOSOMAL_GENES } from './game/genes';
 import { sound } from './game/sound';
 import {
   BreedingClutch,
   DecorSlot,
   GameLogEntry,
   GameState,
+  GeneId,
+  PedigreeNode,
   ShopListing,
   Snake,
 } from './game/types';
@@ -43,6 +49,8 @@ function createInitialState(): GameState {
   return {
     day: 1,
     money: 12000,
+    reputation: 0,
+    trophies: 0,
     snakes: [],
     terrariums: [
       { id: 'terr_1', name: 'ตู้เลี้ยง #1', decor: { ...DEFAULT_DECOR } },
@@ -58,6 +66,9 @@ function createInitialState(): GameState {
     unlockedDecorIds: DECOR_ITEMS.filter((d) => d.cost === 0).map((d) => d.id),
     discoveredMorphs: {},
     marketTrend: MARKET_TRENDS[0],
+    currentExpo: EXPO_THEMES[0],
+    lastExpoDayEntered: 0,
+    expoHistory: [],
     totalBred: 0,
     totalSold: 0,
     logs: [
@@ -76,11 +87,32 @@ function loadSavedState(): GameState {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return createInitialState();
-    const parsed = JSON.parse(raw) as GameState;
+    const parsed = JSON.parse(raw) as Partial<GameState>;
     if (!parsed || typeof parsed.money !== 'number' || !Array.isArray(parsed.terrariums)) {
       return createInitialState();
     }
-    return parsed;
+    const base = createInitialState();
+    const day = parsed.day ?? 1;
+    const migratedSnakes: Snake[] = (parsed.snakes || []).map((s) => ({
+      ...s,
+      hunger: s.hunger ?? 90,
+      isInBlue: s.isInBlue ?? false,
+      nextShedDay: s.nextShedDay ?? day + 4,
+      freshShedUntilDay: s.freshShedUntilDay ?? 0,
+      cooldownUntilDay: s.cooldownUntilDay ?? 0,
+      dnaTested: s.dnaTested ?? (!s.posHets || Object.keys(s.posHets).length === 0),
+    }));
+
+    return {
+      ...base,
+      ...parsed,
+      snakes: migratedSnakes,
+      reputation: parsed.reputation ?? 0,
+      trophies: parsed.trophies ?? 0,
+      currentExpo: parsed.currentExpo ?? EXPO_THEMES[0],
+      lastExpoDayEntered: parsed.lastExpoDayEntered ?? 0,
+      expoHistory: parsed.expoHistory ?? [],
+    };
   } catch {
     return createInitialState();
   }
@@ -272,6 +304,91 @@ export default function App() {
     }));
   };
 
+  const handleFeedSnake = (snakeId: string) => {
+    if (state.money < 60) return;
+    const target = state.snakes.find((s) => s.id === snakeId);
+    if (!target) return;
+    sound.click();
+    setState((prev) => ({
+      ...prev,
+      money: prev.money - 60,
+      snakes: prev.snakes.map((s) =>
+        s.id === snakeId
+          ? {
+              ...s,
+              hunger: 100,
+              ageDays: Math.min(s.matureDays, s.ageDays + (s.ageDays < s.matureDays ? 1 : 0)),
+            }
+          : s
+      ),
+      logs: pushLog(prev.logs, prev.day, `ให้อาหาร ${target.name} เรียบร้อย (ความอิ่ม 100%)`, 'info'),
+    }));
+  };
+
+  const handleDnaTestSnake = (snakeId: string) => {
+    if (state.money < 650) return;
+    const target = state.snakes.find((s) => s.id === snakeId);
+    if (!target || target.dnaTested) return;
+
+    sound.hatch();
+
+    const confirmedHets: string[] = [];
+    for (const g of AUTOSOMAL_GENES) {
+      const id = g.id as GeneId;
+      if (g.inheritance === 'recessive' && target.posHets?.[id]) {
+        if ((target.genotype.alleles[id] || 0) === 1) {
+          confirmedHets.push(`พบยีนแฝง ${g.nameEn} 100%!`);
+        } else {
+          confirmedHets.push(`ไม่พบยีน ${g.nameEn}`);
+        }
+      }
+    }
+
+    setState((prev) => ({
+      ...prev,
+      money: prev.money - 650,
+      snakes: prev.snakes.map((s) =>
+        s.id === snakeId ? { ...s, dnaTested: true, posHets: undefined } : s
+      ),
+      logs: pushLog(
+        prev.logs,
+        prev.day,
+        `ผลตรวจ DNA คราบของ ${target.name}: ${confirmedHets.join(' · ') || 'ยืนยันยีนเรียบร้อย'}`,
+        confirmedHets.some((t) => t.includes('พบยีนแฝง')) ? 'rare' : 'info'
+      ),
+    }));
+  };
+
+  const handleEnterExpo = (snakeId: string) => {
+    if (state.lastExpoDayEntered === state.day) return;
+    if (state.money < state.currentExpo.entryFee) return;
+    const snake = state.snakes.find((s) => s.id === snakeId);
+    if (!snake) return;
+
+    const terr = state.terrariums.find((t) => t.id === snake.terrariumId);
+    const appeal = terr ? getTerrariumAppealBonus(terr.decor) : 0;
+    const result = scoreSnakeForExpo(snake, state.currentExpo, appeal, state.day);
+
+    if (result.rank === 1) sound.hatch();
+    else if (result.prizeMoney > 0) sound.sell();
+    else sound.click();
+
+    setState((prev) => ({
+      ...prev,
+      money: prev.money - prev.currentExpo.entryFee + result.prizeMoney,
+      reputation: prev.reputation + result.repGained,
+      trophies: prev.trophies + (result.rank === 1 ? 1 : 0),
+      lastExpoDayEntered: prev.day,
+      expoHistory: [result, ...prev.expoHistory].slice(0, 12),
+      logs: pushLog(
+        prev.logs,
+        prev.day,
+        `ประกวด ${result.themeTitleTh}: ${snake.name} ได้อันดับที่ ${result.rank} (คะแนน ${result.score}) ${result.prizeMoney > 0 ? `+฿${result.prizeMoney.toLocaleString()} ` : ''}+${result.repGained} ชื่อเสียง`,
+        result.rank === 1 ? 'rare' : result.rank <= 3 ? 'success' : 'info'
+      ),
+    }));
+  };
+
   const handleSendToBreeding = (snake: Snake) => {
     sound.click();
     if (snake.sex === 'M') setPreselectedSireId(snake.id);
@@ -283,6 +400,7 @@ export default function App() {
     const sire = state.snakes.find((s) => s.id === sireId);
     const dam = state.snakes.find((s) => s.id === damId);
     if (!sire || !dam) return;
+    if (dam.cooldownUntilDay > state.day) return;
 
     sound.breed();
     const farmStats = getFarmStatsFromEquipment(state.equipmentLevels);
@@ -308,6 +426,9 @@ export default function App() {
 
     setState((prev) => ({
       ...prev,
+      snakes: prev.snakes.map((s) =>
+        s.id === dam.id ? { ...s, cooldownUntilDay: prev.day + 2 } : s
+      ),
       clutches: [clutch, ...prev.clutches],
       logs: pushLog(
         prev.logs,
@@ -329,21 +450,55 @@ export default function App() {
 
     sound.hatch();
 
+    const sire = state.snakes.find((s) => s.id === clutch.sireId);
+    const dam = state.snakes.find((s) => s.id === clutch.damId);
+    let pedigreeParents: { sireNode: PedigreeNode; damNode: PedigreeNode } | undefined;
+    if (sire && dam) {
+      pedigreeParents = buildPedigreeFromParents(sire, dam);
+    }
+
     const hatchedBabies: Array<{ snake: Snake; isNewMorph: boolean }> = [];
     let nextDiscovered = { ...state.discoveredMorphs };
+    const provenRecessiveGenes = new Set<GeneId>();
 
     survivingEggs.forEach((egg, idx) => {
       const targetTerr = freeTerrariums[idx];
+      const pheno = evaluatePhenotype(egg.sex, egg.genotype, {
+        posHets: egg.posHets,
+        dnaTested: false,
+      });
+
+      for (const g of AUTOSOMAL_GENES) {
+        if (g.inheritance === 'recessive' && (egg.genotype.alleles[g.id as GeneId] || 0) === 2) {
+          provenRecessiveGenes.add(g.id as GeneId);
+        }
+      }
+
+      const babyPedigree: PedigreeNode | undefined = pedigreeParents
+        ? {
+            name: `${pheno.specialComboName || pheno.nameEn.split(' Het ')[0]}`,
+            morphEn: pheno.specialComboName || pheno.nameEn,
+            sex: egg.sex,
+            sire: pedigreeParents.sireNode,
+            dam: pedigreeParents.damNode,
+          }
+        : undefined;
+
       const baby = createNewSnakeFromGenotype({
         sex: egg.sex,
         genotype: egg.genotype,
+        posHets: egg.posHets,
         ageDays: 0,
         matureDays: 6,
         terrariumId: targetTerr.id,
         origin: 'bred',
         parents: { sireName: clutch.sireName, damName: clutch.damName },
+        pedigree: babyPedigree,
         bornDay: state.day,
       });
+      if (baby.pedigree) {
+        baby.pedigree.name = baby.name;
+      }
       const res = recordDiscoveredMorph(nextDiscovered, baby, state.day);
       nextDiscovered = res.nextDiscovered;
       hatchedBabies.push({ snake: baby, isNewMorph: res.isNew });
@@ -352,18 +507,41 @@ export default function App() {
     const lostCount = clutch.eggs.length - survivingEggs.length;
     const newBabies = hatchedBabies.map((b) => b.snake);
 
+    // Auto-prove out Pos Hets on parents if a visual recessive baby hatched!
+    const updatedExistingSnakes = state.snakes.map((s) => {
+      if ((s.id === clutch.sireId || s.id === clutch.damId) && provenRecessiveGenes.size > 0 && s.posHets) {
+        const nextPos = { ...s.posHets };
+        let changed = false;
+        provenRecessiveGenes.forEach((gid) => {
+          if (nextPos[gid]) {
+            delete nextPos[gid];
+            changed = true;
+          }
+        });
+        if (changed) {
+          return {
+            ...s,
+            posHets: Object.keys(nextPos).length > 0 ? nextPos : undefined,
+            dnaTested: Object.keys(nextPos).length === 0 ? true : s.dnaTested,
+          };
+        }
+      }
+      return s;
+    });
+
     setState((prev) => ({
       ...prev,
-      snakes: [...prev.snakes, ...newBabies],
+      snakes: [...updatedExistingSnakes, ...newBabies],
       clutches: prev.clutches.map((c) =>
         c.id === clutchId ? { ...c, hatched: true } : c
       ),
       discoveredMorphs: nextDiscovered,
       totalBred: prev.totalBred + newBabies.length,
+      reputation: prev.reputation + hatchedBabies.filter((b) => b.isNewMorph).length * 5,
       logs: pushLog(
         prev.logs,
         prev.day,
-        `ฟักไข่ ${clutch.sireName} × ${clutch.damName} สำเร็จ! รอดชีวิต ${newBabies.length}/${clutch.eggs.length} ตัว`,
+        `ฟักไข่ ${clutch.sireName} × ${clutch.damName} สำเร็จ! รอดชีวิต ${newBabies.length}/${clutch.eggs.length} ตัว${provenRecessiveGenes.size > 0 ? ' [Prove Out ยีนด้อยพ่อแม่พันธุ์แล้ว!]' : ''}`,
         newBabies.length > 0 ? 'rare' : 'warning'
       ),
     }));
@@ -430,17 +608,29 @@ export default function App() {
       if (snake.isForSale) {
         const terr = state.terrariums.find((t) => t.id === snake.terrariumId);
         const appeal = terr ? getTerrariumAppealBonus(terr.decor) : 0;
-        const val = calculateMarketValue(snake.sex, snake.genotype, state.marketTrend, appeal);
+        const val = calculateMarketValue(
+          snake.sex,
+          snake.genotype,
+          state.marketTrend,
+          appeal,
+          state.reputation,
+          snake.posHets,
+          snake.dnaTested
+        );
         const chance = computeDailySaleChance(
           snake.askingPrice,
           val.finalMarketPrice,
           val.matchesTrend,
-          appeal
+          appeal,
+          state.reputation
         );
         if (Math.random() < chance) {
           earnedMoney += snake.askingPrice;
           soldCount += 1;
-          const pheno = evaluatePhenotype(snake.sex, snake.genotype);
+          const pheno = evaluatePhenotype(snake.sex, snake.genotype, {
+            posHets: snake.posHets,
+            dnaTested: snake.dnaTested,
+          });
           nextLogs = pushLog(
             nextLogs,
             nextDay,
@@ -450,9 +640,31 @@ export default function App() {
           continue;
         }
       }
+
+      // Update Hunger & Shedding cycle
+      const nextHunger = Math.max(15, snake.hunger - 14);
+      let nextIsInBlue = snake.isInBlue;
+      let nextShedDay = snake.nextShedDay;
+      let nextFreshShed = snake.freshShedUntilDay;
+
+      if (snake.isInBlue) {
+        // Completes shed today!
+        nextIsInBlue = false;
+        nextFreshShed = nextDay + 2;
+        nextShedDay = nextDay + 5;
+      } else if (nextDay >= snake.nextShedDay) {
+        nextIsInBlue = true;
+      }
+
+      const growthBoost = snake.hunger >= 50 ? farmStats.growthPerDay : 0.5;
+
       remainingSnakes.push({
         ...snake,
-        ageDays: Math.min(snake.matureDays, snake.ageDays + farmStats.growthPerDay),
+        hunger: nextHunger,
+        isInBlue: nextIsInBlue,
+        nextShedDay,
+        freshShedUntilDay: nextFreshShed,
+        ageDays: Math.min(snake.matureDays, Math.floor(snake.ageDays + growthBoost)),
       });
     }
 
@@ -460,7 +672,6 @@ export default function App() {
       setTimeout(() => sound.sell(), 160);
     }
 
-    // Rotate market trend every 3 days
     let nextTrend = state.marketTrend;
     if (nextDay % 3 === 1) {
       const idx = Math.floor(Math.random() * MARKET_TRENDS.length);
@@ -468,7 +679,13 @@ export default function App() {
       nextLogs = pushLog(nextLogs, nextDay, `เทรนด์ตลาดเปลี่ยนเป็น: ${nextTrend.titleTh}`, 'info');
     }
 
-    // Notify if any clutch is ready to hatch today
+    let nextExpo = state.currentExpo;
+    if (nextDay % 4 === 1) {
+      const eIdx = Math.floor(Math.random() * EXPO_THEMES.length);
+      nextExpo = EXPO_THEMES[eIdx];
+      nextLogs = pushLog(nextLogs, nextDay, `งานประกวดใหม่เปิดรับสมัคร: ${nextExpo.titleTh}`, 'info');
+    }
+
     const newlyReady = state.clutches.filter(
       (c) => !c.hatched && c.hatchDay === nextDay
     );
@@ -485,9 +702,11 @@ export default function App() {
       ...prev,
       day: nextDay,
       money: prev.money + earnedMoney,
+      reputation: prev.reputation + soldCount * 2,
       snakes: remainingSnakes,
       shopListings: generateDailyShopInventory(),
       marketTrend: nextTrend,
+      currentExpo: nextExpo,
       totalSold: prev.totalSold + soldCount,
       logs: nextLogs,
     }));
@@ -512,7 +731,6 @@ export default function App() {
       {/* Strict 3-Zone Top Bar Contract */}
       <header className="bg-[#151D19] border-b-2 border-[#36483E] px-4 sm:px-8 py-3.5">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-8">
-          {/* Zone 1: Brand Title (single text element) */}
           <a
             href="#top"
             onClick={(e) => {
@@ -524,12 +742,11 @@ export default function App() {
             BALL PYTHON PIXEL
           </a>
 
-          {/* Zone 2: 5 Single-Line Nav Links */}
           <nav className="flex items-center gap-5 sm:gap-6 overflow-x-auto text-sm font-semibold">
             {(
               [
                 ['farm', 'ฟาร์มเลี้ยง'],
-                ['market', 'ตลาดซื้อขาย'],
+                ['market', 'ตลาดและงานประกวด'],
                 ['breeding', 'ผสมพันธุ์'],
                 ['equipment', 'อุปกรณ์และตกแต่ง'],
                 ['codex', 'สารานุกรมมอร์ฟ'],
@@ -557,7 +774,6 @@ export default function App() {
             ))}
           </nav>
 
-          {/* Zone 3: 1 Primary CTA */}
           <div className="shrink-0">
             <button
               onClick={handleAdvanceDay}
@@ -583,6 +799,10 @@ export default function App() {
               <strong className="text-[#4ADE80] text-sm">฿{state.money.toLocaleString()}</strong>
             </div>
             <div>
+              <span className="text-[#9BA89E]">ชื่อเสียง:</span>{' '}
+              <strong className="text-[#EAB308]">{state.reputation}</strong>
+            </div>
+            <div>
               <span className="text-[#9BA89E]">งูในฟาร์ม:</span>{' '}
               <strong className="text-[#F4F0E2]">
                 {state.snakes.length}/{state.terrariums.length}
@@ -590,7 +810,7 @@ export default function App() {
             </div>
             <div>
               <span className="text-[#9BA89E]">โอกาสรอดลูกงู:</span>{' '}
-              <strong className="text-[#EAB308]">{farmStats.survivalRate}%</strong>
+              <strong className="text-[#4ADE80]">{farmStats.survivalRate}%</strong>
             </div>
             <div>
               <span className="text-[#9BA89E]">มอร์ฟที่ค้นพบ:</span>{' '}
@@ -620,7 +840,6 @@ export default function App() {
 
       {/* Main Content Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-6 space-y-6">
-        {/* Latest Farm Activity Feed (1-line crisp alert) */}
         {state.logs[0] && (
           <div className="pixel-inset px-4 py-2.5 flex items-center justify-between gap-4 text-xs">
             <div className="truncate">
@@ -650,7 +869,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Active View */}
         {activeTab === 'farm' && (
           <FarmView
             state={state}
@@ -658,6 +876,8 @@ export default function App() {
             onToggleSale={handleToggleSale}
             onUpdateDecor={handleUpdateDecor}
             onRenameSnake={handleRenameSnake}
+            onFeedSnake={handleFeedSnake}
+            onDnaTestSnake={handleDnaTestSnake}
             onSendToBreeding={handleSendToBreeding}
             onGoToShop={() => setActiveTab('market')}
             onGoToEquipment={() => setActiveTab('equipment')}
@@ -669,6 +889,7 @@ export default function App() {
             state={state}
             onBuyListing={handleBuyListing}
             onRefreshShops={handleRefreshShops}
+            onEnterExpo={handleEnterExpo}
           />
         )}
 
@@ -730,7 +951,10 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {hatchModal.hatchedBabies.map(({ snake, isNewMorph }) => {
-                  const ph = evaluatePhenotype(snake.sex, snake.genotype);
+                  const ph = evaluatePhenotype(snake.sex, snake.genotype, {
+                    posHets: snake.posHets,
+                    dnaTested: snake.dnaTested,
+                  });
                   return (
                     <div key={snake.id} className="pixel-card p-3 space-y-2">
                       <div className="pixel-inset p-2 flex justify-center">
